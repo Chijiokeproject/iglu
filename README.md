@@ -117,8 +117,8 @@ Pipeline parameters:
 - `ENABLE_DATADOG`: enable the Datadog ECS Fargate sidecar
 - `DATADOG_API_KEY_SECRET_ARN`: Secrets Manager ARN for the Datadog API key
 - `DATADOG_SITE`: Datadog site, for example `datadoghq.com`
-- `MONITORING_AMI_ID`: Red Hat Enterprise Linux AMI ID for the monitoring server
-- `ALLOWED_ADMIN_CIDR`: restricted public CIDR for Grafana and Prometheus
+- `MONITORING_AMI_ID`: optional Red Hat Enterprise Linux AMI ID override for the monitoring server; blank uses the Terraform environment default
+- `ALLOWED_ADMIN_CIDR`: optional restricted public CIDR override for Grafana and Prometheus; blank uses the Terraform environment default
 
 ## Route 53 DNS
 
