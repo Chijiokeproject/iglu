@@ -1,6 +1,6 @@
 output "jenkins_url" {
   description = "Jenkins web URL."
-  value       = module.jenkins_server.url
+  value       = "https://${local.jenkins_fqdn}"
 }
 
 output "jenkins_dns_name" {
@@ -9,8 +9,8 @@ output "jenkins_dns_name" {
 }
 
 output "jenkins_dns_url" {
-  description = "Jenkins URL using Route 53 DNS when enabled, otherwise the ALB DNS name."
-  value       = var.create_route53_record ? "${local.jenkins_scheme}://${aws_route53_record.jenkins[0].fqdn}" : module.jenkins_server.url
+  description = "Jenkins HTTPS URL using its configured DNS hostname."
+  value       = "https://${local.jenkins_fqdn}"
 }
 
 output "jenkins_instance_id" {
@@ -25,12 +25,12 @@ output "jenkins_public_ip" {
 
 output "grafana_url" {
   description = "Grafana web URL."
-  value       = var.create_route53_record ? "http://${aws_route53_record.jenkins_monitoring["grafana"].fqdn}:3000" : module.monitoring_server.grafana_url
+  value       = var.create_route53_record ? "https://${aws_route53_record.jenkins_monitoring["grafana"].fqdn}" : module.monitoring_server.grafana_url
 }
 
 output "prometheus_url" {
   description = "Prometheus web URL."
-  value       = var.create_route53_record ? "http://${aws_route53_record.jenkins_monitoring["prometheus"].fqdn}:9090" : module.monitoring_server.prometheus_url
+  value       = var.create_route53_record ? "https://${aws_route53_record.jenkins_monitoring["prometheus"].fqdn}" : module.monitoring_server.prometheus_url
 }
 
 output "monitoring_instance_id" {

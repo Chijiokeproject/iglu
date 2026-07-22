@@ -37,3 +37,8 @@ output "load_balancer_security_group_id" {
   description = "Jenkins load balancer security group ID."
   value       = aws_security_group.alb.id
 }
+
+output "https_listener_arn" {
+  description = "Jenkins HTTPS listener ARN for additional host-based routes."
+  value       = try(aws_lb_listener.https[0].arn, null)
+}

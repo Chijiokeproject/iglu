@@ -44,6 +44,17 @@ variable "create_route53_record" {
   default     = true
 }
 
+variable "acm_certificate_arn" {
+  type        = string
+  description = "Optional existing ACM certificate ARN covering the application, Grafana, and Prometheus hostnames."
+  default     = null
+
+  validation {
+    condition     = var.acm_certificate_arn == null ? true : startswith(var.acm_certificate_arn, "arn:aws:acm:")
+    error_message = "acm_certificate_arn must be null or a valid ACM certificate ARN."
+  }
+}
+
 variable "prod_subdomain" {
   type        = string
   description = "Subdomain used for the prod application."
@@ -56,6 +67,12 @@ variable "enable_datadog" {
   default     = false
 }
 
+variable "manage_datadog_secrets" {
+  type        = bool
+  description = "Create Secrets Manager containers for the Datadog API and application keys."
+  default     = true
+}
+
 variable "datadog_api_key_secret_arn" {
   type        = string
   description = "AWS Secrets Manager secret ARN containing the Datadog API key."
@@ -64,8 +81,14 @@ variable "datadog_api_key_secret_arn" {
 
 variable "datadog_api_key_secret_name" {
   type        = string
-  description = "AWS Secrets Manager secret name containing the Datadog API key."
-  default     = "iglu/datadog/api-key"
+  description = "Optional AWS Secrets Manager name for the Datadog API key."
+  default     = null
+}
+
+variable "datadog_app_key_secret_name" {
+  type        = string
+  description = "Optional AWS Secrets Manager name for the Datadog application key."
+  default     = null
 }
 
 variable "datadog_site" {

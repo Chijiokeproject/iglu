@@ -41,19 +41,19 @@ resource "aws_security_group" "monitoring" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "Grafana web UI"
-    from_port   = 3000
-    to_port     = 3000
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_admin_cidr]
+    description     = "Grafana from monitoring ALB"
+    from_port       = 3000
+    to_port         = 3000
+    protocol        = "tcp"
+    security_groups = [var.load_balancer_security_group_id]
   }
 
   ingress {
-    description = "Prometheus web UI"
-    from_port   = 9090
-    to_port     = 9090
-    protocol    = "tcp"
-    cidr_blocks = [var.allowed_admin_cidr]
+    description     = "Prometheus from monitoring ALB"
+    from_port       = 9090
+    to_port         = 9090
+    protocol        = "tcp"
+    security_groups = [var.load_balancer_security_group_id]
   }
 
   egress {
@@ -68,6 +68,111 @@ resource "aws_security_group" "monitoring" {
   })
 }
 
+resource "aws_lb_target_group" "grafana" {
+  name     = "${var.project}-${var.environment}-grafana-tg"
+  port     = 3000
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+
+  health_check {
+    path    = "/api/health"
+    matcher = "200"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_lb_target_group" "prometheus" {
+  name     = "${var.project}-${var.environment}-prom-tg"
+  port     = 9090
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
+
+  health_check {
+    path    = "/-/healthy"
+    matcher = "200"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_lb_target_group_attachment" "grafana" {
+  target_group_arn = aws_lb_target_group.grafana.arn
+  target_id        = aws_instance.monitoring.id
+  port             = 3000
+}
+
+resource "aws_lb_target_group_attachment" "prometheus" {
+  target_group_arn = aws_lb_target_group.prometheus.arn
+  target_id        = aws_instance.monitoring.id
+  port             = 9090
+}
+
+resource "aws_lb_listener_rule" "grafana" {
+  listener_arn = var.https_listener_arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.grafana.arn
+  }
+
+  condition {
+    host_header {
+      values = [var.grafana_hostname]
+    }
+  }
+
+  condition {
+    source_ip {
+      values = [var.allowed_admin_cidr]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "prometheus" {
+  listener_arn = var.https_listener_arn
+  priority     = 20
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.prometheus.arn
+  }
+
+  condition {
+    host_header {
+      values = [var.prometheus_hostname]
+    }
+  }
+
+  condition {
+    source_ip {
+      values = [var.allowed_admin_cidr]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "deny_untrusted_monitoring_access" {
+  listener_arn = var.https_listener_arn
+  priority     = 30
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Forbidden"
+      status_code  = "403"
+    }
+  }
+
+  condition {
+    host_header {
+      values = [var.grafana_hostname, var.prometheus_hostname]
+    }
+  }
+}
+
 resource "aws_instance" "monitoring" {
   ami                    = var.ami_id
   instance_type          = var.instance_type
@@ -79,6 +184,8 @@ resource "aws_instance" "monitoring" {
     blackbox_exporter_version = var.blackbox_exporter_version
     prometheus_targets_yaml   = local.prometheus_targets_yaml
     http_probe_targets_yaml   = local.http_probe_targets_yaml
+    grafana_hostname          = var.grafana_hostname
+    prometheus_hostname       = var.prometheus_hostname
   })
   associate_public_ip_address = true
   iam_instance_profile        = aws_iam_instance_profile.monitoring.name

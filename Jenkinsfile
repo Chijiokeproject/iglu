@@ -28,8 +28,14 @@ pipeline {
 
     string(
       name: 'DATADOG_API_KEY_SECRET_NAME',
-      defaultValue: 'iglu/datadog/api-key',
-      description: 'Secrets Manager name used when no ARN override is supplied'
+      defaultValue: '',
+      description: 'Optional API-key secret name override; blank uses an environment-specific managed secret'
+    )
+
+    string(
+      name: 'DATADOG_APP_KEY_SECRET_NAME',
+      defaultValue: '',
+      description: 'Optional application-key secret name override; blank uses an environment-specific managed secret'
     )
 
     string(
@@ -102,9 +108,16 @@ pipeline {
 
             def terraformEnvironment = [
               "TF_VAR_enable_datadog=${params.ENABLE_DATADOG}",
-              "TF_VAR_datadog_api_key_secret_name=${params.DATADOG_API_KEY_SECRET_NAME.trim()}",
               "TF_VAR_datadog_site=${params.DATADOG_SITE.trim()}"
             ]
+
+            if (params.DATADOG_API_KEY_SECRET_NAME?.trim()) {
+              terraformEnvironment.add("TF_VAR_datadog_api_key_secret_name=${params.DATADOG_API_KEY_SECRET_NAME.trim()}")
+            }
+
+            if (params.DATADOG_APP_KEY_SECRET_NAME?.trim()) {
+              terraformEnvironment.add("TF_VAR_datadog_app_key_secret_name=${params.DATADOG_APP_KEY_SECRET_NAME.trim()}")
+            }
 
             if (params.MONITORING_AMI_ID?.trim()) {
               terraformEnvironment.add("TF_VAR_monitoring_ami_id=${params.MONITORING_AMI_ID.trim()}")
@@ -114,14 +127,8 @@ pipeline {
               terraformEnvironment.add("TF_VAR_allowed_admin_cidr=${params.ALLOWED_ADMIN_CIDR.trim()}")
             }
 
-            if (params.ENABLE_DATADOG) {
-              if (!params.DATADOG_API_KEY_SECRET_ARN?.trim() && !params.DATADOG_API_KEY_SECRET_NAME?.trim()) {
-                error 'DATADOG_API_KEY_SECRET_NAME or DATADOG_API_KEY_SECRET_ARN is required when ENABLE_DATADOG is true.'
-              }
-
-              if (params.DATADOG_API_KEY_SECRET_ARN?.trim()) {
-                terraformEnvironment.add("TF_VAR_datadog_api_key_secret_arn=${params.DATADOG_API_KEY_SECRET_ARN.trim()}")
-              }
+            if (params.DATADOG_API_KEY_SECRET_ARN?.trim()) {
+              terraformEnvironment.add("TF_VAR_datadog_api_key_secret_arn=${params.DATADOG_API_KEY_SECRET_ARN.trim()}")
             }
 
             withEnv(terraformEnvironment) {
@@ -136,7 +143,7 @@ pipeline {
       }
     }
 
-    stage('Approval') {
+    stage('Manual Approval') {
       when {
         anyOf {
           expression {
@@ -150,10 +157,12 @@ pipeline {
       }
 
       steps {
-        input(
-          message: "Run terraform ${params.ACTION} for ${params.ENVIRONMENT}?",
-          ok: 'Continue'
-        )
+        timeout(time: 30, unit: 'MINUTES') {
+          input(
+            message: "Approve Terraform ${params.ACTION} for the ${params.ENVIRONMENT} environment?",
+            ok: 'Approve'
+          )
+        }
       }
     }
 

@@ -29,7 +29,6 @@ and that these prerequisites exist:
 
 - the S3 state bucket and DynamoDB lock table described below
 - the public Route 53 hosted zone for `chijiokedevops.com`
-- an issued ACM certificate in `us-east-1` only when enabling Jenkins HTTPS
 - an x86_64 RHEL AMI in `us-east-1`
 - a restricted public admin CIDR, normally your public IP followed by `/32`
 
@@ -58,11 +57,14 @@ terraform plan
 terraform apply
 ```
 
-The Jenkins environment creates two Jenkins EC2 instances by default, places them
-across the two public subnets/AZs, and fronts them with an Application Load
-Balancer. For testing, the certificate defaults to `null` and the ALB uses HTTP
-on port `80`. To use HTTPS on port `443`, supply an ACM certificate from the same
-region that covers `jenkins.chijiokedevops.com` or `*.chijiokedevops.com`:
+The Jenkins environment creates one Jenkins controller and fronts it with an
+Application Load Balancer. Terraform requests and DNS-validates an ACM
+certificate for Jenkins, Grafana, and Prometheus using the existing public
+Route 53 zone. Public HTTP requests on port `80` redirect permanently to HTTPS
+on port `443`.
+
+To use an existing certificate instead, provide an ACM certificate from the
+same region that covers all three Jenkins environment hostnames:
 
 ```sh
 terraform apply \
@@ -116,6 +118,8 @@ Pipeline parameters:
 - `ACTION`: `plan`, `apply`, or `destroy`
 - `ENABLE_DATADOG`: enable the Datadog ECS Fargate sidecar
 - `DATADOG_API_KEY_SECRET_ARN`: Secrets Manager ARN for the Datadog API key
+- `DATADOG_API_KEY_SECRET_NAME`: optional API-key secret name override
+- `DATADOG_APP_KEY_SECRET_NAME`: optional application-key secret name override
 - `DATADOG_SITE`: Datadog site, for example `datadoghq.com`
 - `MONITORING_AMI_ID`: optional Red Hat Enterprise Linux AMI ID override for the monitoring server; blank uses the Terraform environment default
 - `ALLOWED_ADMIN_CIDR`: optional restricted public CIDR override for Grafana and Prometheus; blank uses the Terraform environment default
@@ -141,6 +145,13 @@ Terraform creates:
 - `grafana.prod.chijiokedevops.com` -> prod monitoring server
 - `prometheus.prod.chijiokedevops.com` -> prod monitoring server
 
+Each stack requests a DNS-validated ACM certificate for its three hostnames.
+Application, Jenkins, Grafana, and Prometheus traffic terminates TLS at the
+environment's shared Application Load Balancer. Host-based rules route Grafana
+and Prometheus only for the restricted admin CIDR. Port `80` is retained only
+for redirects to HTTPS; backend traffic from the load balancer to ECS or EC2
+remains private HTTP.
+
 Useful outputs:
 
 ```sh
@@ -149,8 +160,9 @@ terraform output dev_url
 terraform output prod_url
 ```
 
-Set `create_route53_record = false` only when deploying into an account without
-the hosted zone.
+Set `create_route53_record = false` only when DNS is managed externally, and
+provide an existing `acm_certificate_arn` (or
+`jenkins_acm_certificate_arn`) covering the configured hostnames.
 
 Note: this creates multiple Jenkins controllers behind one ALB for lab-level
 availability. Production Jenkins HA needs a deeper controller state and plugin
@@ -190,7 +202,7 @@ The ECS Fargate module creates:
 
 - an ALB target group with `target_type = "ip"` for Fargate tasks
 - a CloudWatch log group at `/ecs/<project>-<environment>`
-- ECS task logging through the `awslogs` driver
+- ECS task logging through `awslogs`, or FireLens direct delivery when Datadog logs are enabled
 - environment-safe resource names using `<project>-<environment>`
 
 The VPC module creates a NAT Gateway and routes private subnets through it. This
@@ -199,22 +211,48 @@ send CloudWatch logs, read Secrets Manager values, and communicate with Datadog.
 
 ## Datadog For ECS Fargate
 
-Datadog is integrated into the ECS Fargate module as an optional sidecar
-container and is disabled by default. When enabled, Terraform automatically
-looks up the `iglu/datadog/api-key` secret in AWS Secrets Manager.
+Datadog is integrated into the ECS Fargate task as an optional Agent sidecar.
+Terraform creates environment-specific AWS Secrets Manager containers for both
+Datadog credentials without putting their values in Terraform configuration or
+state:
 
-Before the first Terraform plan or apply, store the API key issued by your
-Datadog account. The helper prompts for the value without writing it to the
-repository or Terraform state:
+- `iglu/dev/datadog/api-key` and `iglu/dev/datadog/app-key`
+- `iglu/prod/datadog/api-key` and `iglu/prod/datadog/app-key`
+
+The Agent receives only the API key. The application key is retained for
+Datadog API automation and is not exposed to ECS containers.
+
+Bootstrap each environment in two safe steps. First create the infrastructure
+and empty secret containers with the Agent disabled:
 
 ```sh
-./create-datadog-secret.sh
+terraform apply -var='enable_datadog=false'
 ```
 
-Then plan and apply normally:
+Populate the secret values outside Terraform. The helper prompts without
+echoing the keys and avoids putting either value in Terraform state:
 
 ```sh
-terraform plan -out=tfplan
+./set-datadog-secrets.sh dev
+```
+
+If a previous `terraform destroy` scheduled the Datadog secrets for deletion,
+AWS reserves their names during the seven-day recovery window. Restore the
+existing secrets and import them back into the correct Terraform state before
+planning again:
+
+```sh
+./recover-datadog-secrets.sh dev
+```
+
+Use `prod` instead of `dev` for the production state. The recovery helper
+cancels deletion only when necessary and skips imports for resources that are
+already present in state.
+
+Then enable and deploy the Agent sidecar and FireLens log router:
+
+```sh
+terraform plan -var='enable_datadog=true' -out=tfplan
 terraform apply tfplan
 ```
 
@@ -223,21 +261,25 @@ dev_datadog_url` (or `terraform output prod_datadog_url` from the prod
 directory). Sign in and filter containers or services by `env:dev` or
 `env:prod`.
 
-To enable it later, set `enable_datadog=true` after creating the secret.
-`datadog_api_key_secret_arn` remains available as an optional override when the
-secret has a different name or lives outside the default setup.
+For production, run Terraform from `terraform/environments/prod` and invoke
+`./set-datadog-secrets.sh prod` from the repository root between the two
+applies. `datadog_api_key_secret_arn` remains available when an existing secret
+is managed outside this stack; set `manage_datadog_secrets=false` when all
+Datadog secret metadata is externally managed.
 
 When deploying through Jenkins, set:
 
 - `ENABLE_DATADOG`: `true`
-- `DATADOG_API_KEY_SECRET_NAME`: `iglu/datadog/api-key` by default
+- `DATADOG_API_KEY_SECRET_NAME`: blank for the environment-specific default
+- `DATADOG_APP_KEY_SECRET_NAME`: blank for the environment-specific default
 - `DATADOG_API_KEY_SECRET_ARN`: optional Secrets Manager ARN override
 - `DATADOG_SITE`: your Datadog site
 
 The Datadog sidecar is configured for ECS Fargate metrics and can receive APM
-traffic from instrumented application containers. Log collection variables are
-included, but production Fargate log routing may also require FireLens depending
-on the logging design you choose.
+traffic from instrumented application containers. When log collection is
+enabled, an AWS for Fluent Bit FireLens sidecar sends application logs directly
+to Datadog using the API key from Secrets Manager. The Agent and log router send
+their own operational logs to CloudWatch Logs.
 
 You can change the Datadog site if needed:
 
@@ -250,8 +292,8 @@ terraform apply \
 
 Each environment includes monitoring with:
 
-- Prometheus on port `9090`
-- Grafana on port `3000`
+- Prometheus behind an HTTPS ALB, with private backend port `9090`
+- Grafana behind an HTTPS ALB, with private backend port `3000`
 - Node Exporter for host metrics
 - Blackbox Exporter for HTTP health checks
 

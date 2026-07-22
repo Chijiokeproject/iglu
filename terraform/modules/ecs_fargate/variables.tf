@@ -48,6 +48,16 @@ variable "public_subnet_ids" {
   }
 }
 
+variable "acm_certificate_arn" {
+  type        = string
+  description = "ACM certificate ARN for the public HTTPS listener."
+
+  validation {
+    condition     = startswith(var.acm_certificate_arn, "arn:aws:acm:")
+    error_message = "acm_certificate_arn must be a valid ACM certificate ARN."
+  }
+}
+
 variable "private_subnet_ids" {
   type        = list(string)
   description = "Private subnet IDs for ECS tasks."
@@ -124,6 +134,12 @@ variable "enable_datadog" {
   default     = false
 }
 
+variable "manage_datadog_secrets" {
+  type        = bool
+  description = "Create Secrets Manager containers for the Datadog API and application keys. Secret values must be populated outside Terraform."
+  default     = true
+}
+
 variable "datadog_api_key_secret_arn" {
   type        = string
   description = "AWS Secrets Manager secret ARN containing the Datadog API key."
@@ -137,12 +153,23 @@ variable "datadog_api_key_secret_arn" {
 
 variable "datadog_api_key_secret_name" {
   type        = string
-  description = "AWS Secrets Manager secret name containing the Datadog API key. Used when datadog_api_key_secret_arn is null."
-  default     = "iglu/datadog/api-key"
+  description = "Optional AWS Secrets Manager name for the Datadog API key. Defaults to <project>/<environment>/datadog/api-key."
+  default     = null
 
   validation {
-    condition     = length(trimspace(var.datadog_api_key_secret_name)) > 0
-    error_message = "datadog_api_key_secret_name must not be empty."
+    condition     = var.datadog_api_key_secret_name == null ? true : length(trimspace(var.datadog_api_key_secret_name)) > 0
+    error_message = "datadog_api_key_secret_name must be null or a non-empty name."
+  }
+}
+
+variable "datadog_app_key_secret_name" {
+  type        = string
+  description = "Optional AWS Secrets Manager name for the Datadog application key. Defaults to <project>/<environment>/datadog/app-key."
+  default     = null
+
+  validation {
+    condition     = var.datadog_app_key_secret_name == null ? true : length(trimspace(var.datadog_app_key_secret_name)) > 0
+    error_message = "datadog_app_key_secret_name must be null or a non-empty name."
   }
 }
 
@@ -165,6 +192,17 @@ variable "datadog_agent_image" {
   validation {
     condition     = length(trimspace(var.datadog_agent_image)) > 0
     error_message = "datadog_agent_image must not be empty."
+  }
+}
+
+variable "datadog_firelens_image" {
+  type        = string
+  description = "AWS for Fluent Bit image used to send Fargate logs to Datadog through FireLens."
+  default     = "public.ecr.aws/aws-observability/aws-for-fluent-bit:stable"
+
+  validation {
+    condition     = length(trimspace(var.datadog_firelens_image)) > 0
+    error_message = "datadog_firelens_image must not be empty."
   }
 }
 

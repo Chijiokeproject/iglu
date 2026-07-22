@@ -18,9 +18,39 @@ variable "subnet_id" {
   description = "Public subnet ID where monitoring will run."
 }
 
+variable "load_balancer_security_group_id" {
+  type        = string
+  description = "Security group ID of the shared public HTTPS Application Load Balancer."
+
+  validation {
+    condition     = startswith(var.load_balancer_security_group_id, "sg-")
+    error_message = "load_balancer_security_group_id must be a valid security group ID."
+  }
+}
+
+variable "https_listener_arn" {
+  type        = string
+  description = "ARN of the shared ALB HTTPS listener used for host-based monitoring routes."
+
+  validation {
+    condition     = startswith(var.https_listener_arn, "arn:aws:elasticloadbalancing:")
+    error_message = "https_listener_arn must be a valid ALB listener ARN."
+  }
+}
+
+variable "grafana_hostname" {
+  type        = string
+  description = "Public DNS hostname used to route HTTPS traffic to Grafana."
+}
+
+variable "prometheus_hostname" {
+  type        = string
+  description = "Public DNS hostname used to route HTTPS traffic to Prometheus."
+}
+
 variable "allowed_admin_cidr" {
   type        = string
-  description = "CIDR block allowed to access Grafana and Prometheus."
+  description = "Source CIDR allowed by the shared ALB rules to access Grafana and Prometheus."
 
   validation {
     condition     = can(cidrnetmask(var.allowed_admin_cidr)) && var.allowed_admin_cidr != "0.0.0.0/0"

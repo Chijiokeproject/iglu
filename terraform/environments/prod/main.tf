@@ -14,9 +14,12 @@ provider "aws" {
 }
 
 locals {
-  project     = "iglu"
-  environment = "prod"
-  prod_fqdn   = "${var.prod_subdomain}.${var.domain_name}"
+  project         = "iglu"
+  environment     = "prod"
+  prod_fqdn       = "${var.prod_subdomain}.${var.domain_name}"
+  grafana_fqdn    = "grafana.${local.prod_fqdn}"
+  prometheus_fqdn = "prometheus.${local.prod_fqdn}"
+  certificate_arn = var.acm_certificate_arn != null ? var.acm_certificate_arn : try(aws_acm_certificate_validation.environment[0].certificate_arn, null)
   tags = {
     Project     = local.project
     Environment = local.environment
@@ -28,6 +31,42 @@ data "aws_route53_zone" "primary" {
   count        = var.create_route53_record ? 1 : 0
   name         = var.domain_name
   private_zone = false
+}
+
+resource "aws_acm_certificate" "environment" {
+  count                     = var.acm_certificate_arn == null && var.create_route53_record ? 1 : 0
+  domain_name               = local.prod_fqdn
+  subject_alternative_names = [local.grafana_fqdn, local.prometheus_fqdn]
+  validation_method         = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = local.tags
+}
+
+resource "aws_route53_record" "certificate_validation" {
+  for_each = var.acm_certificate_arn == null && var.create_route53_record ? {
+    for option in aws_acm_certificate.environment[0].domain_validation_options : option.domain_name => {
+      name   = option.resource_record_name
+      record = option.resource_record_value
+      type   = option.resource_record_type
+    }
+  } : {}
+
+  allow_overwrite = true
+  zone_id         = data.aws_route53_zone.primary[0].zone_id
+  name            = each.value.name
+  type            = each.value.type
+  ttl             = 60
+  records         = [each.value.record]
+}
+
+resource "aws_acm_certificate_validation" "environment" {
+  count                   = var.acm_certificate_arn == null && var.create_route53_record ? 1 : 0
+  certificate_arn         = aws_acm_certificate.environment[0].arn
+  validation_record_fqdns = [for record in aws_route53_record.certificate_validation : record.fqdn]
 }
 
 module "vpc" {
@@ -49,10 +88,13 @@ module "ecs_fargate" {
   vpc_id                      = module.vpc.vpc_id
   public_subnet_ids           = module.vpc.public_subnet_ids
   private_subnet_ids          = module.vpc.private_subnet_ids
+  acm_certificate_arn         = local.certificate_arn
   container_image             = "nginxinc/nginx-unprivileged:stable"
   enable_datadog              = var.enable_datadog
+  manage_datadog_secrets      = var.manage_datadog_secrets
   datadog_api_key_secret_arn  = var.datadog_api_key_secret_arn
   datadog_api_key_secret_name = var.datadog_api_key_secret_name
+  datadog_app_key_secret_name = var.datadog_app_key_secret_name
   datadog_site                = var.datadog_site
   datadog_logs_enabled        = var.datadog_logs_enabled
   datadog_apm_enabled         = var.datadog_apm_enabled
@@ -60,16 +102,20 @@ module "ecs_fargate" {
 }
 
 module "monitoring_server" {
-  source             = "../../modules/monitoring_server"
-  project            = local.project
-  environment        = local.environment
-  vpc_id             = module.vpc.vpc_id
-  subnet_id          = module.vpc.public_subnet_ids[1]
-  allowed_admin_cidr = var.allowed_admin_cidr
-  instance_type      = var.monitoring_instance_type
-  ami_id             = var.monitoring_ami_id
+  source                          = "../../modules/monitoring_server"
+  project                         = local.project
+  environment                     = local.environment
+  vpc_id                          = module.vpc.vpc_id
+  subnet_id                       = module.vpc.public_subnet_ids[1]
+  load_balancer_security_group_id = module.ecs_fargate.load_balancer_security_group_id
+  https_listener_arn              = module.ecs_fargate.https_listener_arn
+  grafana_hostname                = local.grafana_fqdn
+  prometheus_hostname             = local.prometheus_fqdn
+  allowed_admin_cidr              = var.allowed_admin_cidr
+  instance_type                   = var.monitoring_instance_type
+  ami_id                          = var.monitoring_ami_id
   http_probe_targets = concat([
-    "http://${module.ecs_fargate.load_balancer_dns_name}",
+    "https://${local.prod_fqdn}",
     "http://localhost:3000/login",
     "http://localhost:9090/-/healthy"
   ], var.additional_http_probe_targets)
@@ -95,6 +141,10 @@ resource "aws_route53_record" "prod_monitoring" {
   zone_id = data.aws_route53_zone.primary[0].zone_id
   name    = "${each.value}.${local.prod_fqdn}"
   type    = "A"
-  ttl     = 60
-  records = [module.monitoring_server.public_ip]
+
+  alias {
+    name                   = module.ecs_fargate.load_balancer_dns_name
+    zone_id                = module.ecs_fargate.load_balancer_zone_id
+    evaluate_target_health = true
+  }
 }

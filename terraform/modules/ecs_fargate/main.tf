@@ -11,9 +11,17 @@ resource "aws_security_group" "alb" {
   vpc_id      = var.vpc_id
 
   ingress {
-    description = "Allow HTTP from the internet"
+    description = "Allow HTTP for HTTPS redirection"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow HTTPS from the internet"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -90,6 +98,25 @@ resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = 80
   protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.app.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.acm_certificate_arn
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
@@ -115,18 +142,43 @@ data "aws_iam_policy_document" "ecs_task_execution" {
   }
 }
 
+resource "aws_secretsmanager_secret" "datadog_api_key" {
+  count                   = var.manage_datadog_secrets && var.datadog_api_key_secret_arn == null ? 1 : 0
+  name                    = coalesce(var.datadog_api_key_secret_name, "${var.project}/${var.environment}/datadog/api-key")
+  description             = "Datadog API key for ${var.project} ${var.environment}. Populate the value outside Terraform."
+  recovery_window_in_days = 7
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-datadog-api-key"
+  })
+}
+
+resource "aws_secretsmanager_secret" "datadog_app_key" {
+  count                   = var.manage_datadog_secrets ? 1 : 0
+  name                    = coalesce(var.datadog_app_key_secret_name, "${var.project}/${var.environment}/datadog/app-key")
+  description             = "Datadog application key for ${var.project} ${var.environment}. Populate the value outside Terraform."
+  recovery_window_in_days = 7
+
+  tags = merge(var.tags, {
+    Name = "${local.name_prefix}-datadog-app-key"
+  })
+}
+
 data "aws_secretsmanager_secret" "datadog_api_key" {
-  count = var.enable_datadog && var.datadog_api_key_secret_arn == null ? 1 : 0
-  name  = var.datadog_api_key_secret_name
+  count = !var.manage_datadog_secrets && var.datadog_api_key_secret_arn == null ? 1 : 0
+  name  = coalesce(var.datadog_api_key_secret_name, "${var.project}/${var.environment}/datadog/api-key")
 }
 
 locals {
   name_prefix    = "${var.project}-${var.environment}"
   log_group_name = "/ecs/${local.name_prefix}"
   datadog_api_key_secret_arn = var.datadog_api_key_secret_arn != null ? var.datadog_api_key_secret_arn : try(
+    aws_secretsmanager_secret.datadog_api_key[0].arn,
     data.aws_secretsmanager_secret.datadog_api_key[0].arn,
     null
   )
+  datadog_app_key_secret_arn = try(aws_secretsmanager_secret.datadog_app_key[0].arn, null)
+  datadog_logs_enabled       = var.enable_datadog && var.datadog_logs_enabled
 
   app_container = {
     name  = "app"
@@ -139,20 +191,53 @@ locals {
       }
     ]
     essential = true
-    logConfiguration = {
+    environment = var.enable_datadog ? [
+      {
+        name  = "DD_AGENT_HOST"
+        value = "127.0.0.1"
+      },
+      {
+        name  = "DD_ENV"
+        value = var.environment
+      },
+      {
+        name  = "DD_SERVICE"
+        value = local.name_prefix
+      }
+    ] : []
+    logConfiguration = local.datadog_logs_enabled ? {
+      logDriver = "awsfirelens"
+      options = {
+        Name       = "datadog"
+        Host       = "http-intake.logs.${var.datadog_site}"
+        TLS        = "on"
+        dd_service = local.name_prefix
+        dd_source  = "ecs"
+        dd_tags    = "env:${var.environment},project:${var.project}"
+        provider   = "ecs"
+      }
+      secretOptions = [
+        {
+          name      = "apikey"
+          valueFrom = local.datadog_api_key_secret_arn
+        }
+      ]
+      } : {
       logDriver = "awslogs"
       options = {
         awslogs-group         = local.log_group_name
         awslogs-region        = var.aws_region
         awslogs-stream-prefix = "app"
       }
+      secretOptions = []
     }
   }
 
   datadog_container = {
-    name      = "datadog-agent"
-    image     = var.datadog_agent_image
-    essential = false
+    name              = "datadog-agent"
+    image             = var.datadog_agent_image
+    essential         = false
+    memoryReservation = 128
     environment = [
       {
         name  = "ECS_FARGATE"
@@ -171,14 +256,6 @@ locals {
         value = local.name_prefix
       },
       {
-        name  = "DD_LOGS_ENABLED"
-        value = tostring(var.datadog_logs_enabled)
-      },
-      {
-        name  = "DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL"
-        value = tostring(var.datadog_logs_enabled)
-      },
-      {
         name  = "DD_APM_ENABLED"
         value = tostring(var.datadog_apm_enabled)
       },
@@ -193,12 +270,49 @@ locals {
         valueFrom = local.datadog_api_key_secret_arn
       }
     ]
+    healthCheck = {
+      command     = ["CMD-SHELL", "agent health"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 15
+    }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = local.log_group_name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "datadog-agent"
+      }
+    }
   }
 
-  container_definitions = var.enable_datadog ? jsonencode([
-    local.app_container,
-    local.datadog_container
-  ]) : jsonencode([local.app_container])
+  datadog_log_router_container = {
+    name              = "log-router"
+    image             = var.datadog_firelens_image
+    essential         = true
+    memoryReservation = 64
+    firelensConfiguration = {
+      type = "fluentbit"
+      options = {
+        enable-ecs-log-metadata = "true"
+      }
+    }
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = local.log_group_name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "firelens"
+      }
+    }
+  }
+
+  container_definitions = jsonencode(concat(
+    [local.app_container],
+    var.enable_datadog ? [local.datadog_container] : [],
+    local.datadog_logs_enabled ? [local.datadog_log_router_container] : []
+  ))
 }
 
 resource "aws_iam_role" "task_execution" {
@@ -282,7 +396,7 @@ resource "aws_ecs_service" "app" {
     container_port   = var.container_port
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.https]
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-ecs-service"
   })

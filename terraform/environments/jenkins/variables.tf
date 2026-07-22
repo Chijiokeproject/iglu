@@ -17,7 +17,7 @@ variable "allowed_admin_cidr" {
 
 variable "jenkins_acm_certificate_arn" {
   type        = string
-  description = "Optional ACM certificate ARN for Jenkins HTTPS. When null, the ALB uses HTTP for testing."
+  description = "Optional existing ACM certificate ARN for Jenkins, Grafana, and Prometheus. When null, Terraform creates and DNS-validates one."
   default     = null
 
   validation {

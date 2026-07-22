@@ -62,7 +62,7 @@ resource "aws_security_group" "alb" {
   vpc_id      = var.vpc_id
 
   dynamic "ingress" {
-    for_each = [var.acm_certificate_arn == null ? 80 : 443]
+    for_each = var.acm_certificate_arn == null ? [80] : [80, 443]
 
     content {
       description = ingress.value == 443 ? "Jenkins HTTPS web access" : "Jenkins HTTP test access"
@@ -141,6 +141,24 @@ resource "aws_lb_listener" "http" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.jenkins.arn
+  }
+}
+
+resource "aws_lb_listener" "http_redirect" {
+  count = var.acm_certificate_arn == null ? 0 : 1
+
+  load_balancer_arn = aws_lb.jenkins.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type = "redirect"
+
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
   }
 }
 

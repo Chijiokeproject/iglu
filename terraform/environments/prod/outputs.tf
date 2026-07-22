@@ -14,18 +14,18 @@ output "prod_dns_name" {
 }
 
 output "prod_url" {
-  description = "Prod application URL using Route 53 DNS when enabled, otherwise the ALB DNS name."
-  value       = var.create_route53_record ? "http://${aws_route53_record.prod[0].fqdn}" : "http://${module.ecs_fargate.load_balancer_dns_name}"
+  description = "HTTPS URL for the prod application."
+  value       = "https://${local.prod_fqdn}"
 }
 
 output "prod_grafana_url" {
   description = "Grafana web URL for prod monitoring."
-  value       = var.create_route53_record ? "http://${aws_route53_record.prod_monitoring["grafana"].fqdn}:3000" : module.monitoring_server.grafana_url
+  value       = var.create_route53_record ? "https://${aws_route53_record.prod_monitoring["grafana"].fqdn}" : module.monitoring_server.grafana_url
 }
 
 output "prod_prometheus_url" {
   description = "Prometheus web URL for prod monitoring."
-  value       = var.create_route53_record ? "http://${aws_route53_record.prod_monitoring["prometheus"].fqdn}:9090" : module.monitoring_server.prometheus_url
+  value       = var.create_route53_record ? "https://${aws_route53_record.prod_monitoring["prometheus"].fqdn}" : module.monitoring_server.prometheus_url
 }
 
 output "prod_datadog_url" {
@@ -39,6 +39,16 @@ output "prod_datadog_url" {
     "ap2.datadoghq.com" = "https://ap2.datadoghq.com"
     "uk1.datadoghq.com" = "https://uk1.datadoghq.com"
   }, var.datadog_site)
+}
+
+output "prod_datadog_api_key_secret_arn" {
+  description = "Secrets Manager ARN used for the prod Datadog API key."
+  value       = module.ecs_fargate.datadog_api_key_secret_arn
+}
+
+output "prod_datadog_app_key_secret_arn" {
+  description = "Secrets Manager ARN used for the prod Datadog application key."
+  value       = module.ecs_fargate.datadog_app_key_secret_arn
 }
 
 output "prod_monitoring_instance_id" {

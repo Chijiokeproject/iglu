@@ -15,12 +15,12 @@ output "private_ip" {
 
 output "grafana_url" {
   description = "Grafana web URL."
-  value       = "http://${aws_instance.monitoring.public_ip}:3000"
+  value       = "https://${var.grafana_hostname}"
 }
 
 output "prometheus_url" {
   description = "Prometheus web URL."
-  value       = "http://${aws_instance.monitoring.public_ip}:9090"
+  value       = "https://${var.prometheus_hostname}"
 }
 
 output "security_group_id" {

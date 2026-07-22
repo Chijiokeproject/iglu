@@ -72,7 +72,8 @@ Group=prometheus
 Type=simple
 ExecStart=/usr/local/bin/prometheus \
   --config.file=/etc/prometheus/prometheus.yml \
-  --storage.tsdb.path=/var/lib/prometheus
+  --storage.tsdb.path=/var/lib/prometheus \
+  --web.external-url=https://${prometheus_hostname}
 
 [Install]
 WantedBy=multi-user.target
@@ -125,6 +126,8 @@ sslcacert=/etc/pki/tls/certs/ca-bundle.crt
 GRAFANA_REPO
 
 dnf install -y grafana
+sed -i 's|^;domain =.*|domain = ${grafana_hostname}|' /etc/grafana/grafana.ini
+sed -i 's|^;root_url =.*|root_url = https://${grafana_hostname}/|' /etc/grafana/grafana.ini
 mkdir -p /etc/grafana/provisioning/datasources
 cat >/etc/grafana/provisioning/datasources/prometheus.yml <<'GRAFANA_DATASOURCE'
 apiVersion: 1
