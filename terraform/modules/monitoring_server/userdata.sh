@@ -4,7 +4,13 @@ set -euxo pipefail
 # AWS-provided RHEL 8/9 AMIs do not include SSM Agent by default. Install and
 # start it before the longer monitoring bootstrap so Session Manager becomes
 # available even if a later application-install step fails.
-dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+for attempt in $(seq 1 10); do
+  if dnf install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm; then
+    break
+  fi
+  sleep 15
+done
+rpm -q amazon-ssm-agent
 systemctl enable --now amazon-ssm-agent
 
 dnf update -y
@@ -53,6 +59,83 @@ scrape_configs:
       - target_label: __address__
         replacement: localhost:9115
 PROMETHEUS_CONFIG
+
+%{ if ec2_sd_tag_name != "" ~}
+cat >>/etc/prometheus/prometheus.yml <<'PROMETHEUS_EC2_SD'
+
+  - job_name: jenkins-node-exporter
+    ec2_sd_configs:
+      - region: ${aws_region}
+        port: 9100
+        filters:
+          - name: tag:Name
+            values: [${ec2_sd_tag_name}]
+          - name: instance-state-name
+            values: [running]
+    relabel_configs:
+      - source_labels: [__meta_ec2_private_ip]
+        regex: (.+)
+        target_label: __address__
+        replacement: $${1}:9100
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance
+PROMETHEUS_EC2_SD
+%{ endif ~}
+
+%{ if ecs_cluster_name != "" ~}
+dnf install -y java-21-openjdk-headless
+mkdir -p /opt/cloudwatch_exporter /etc/cloudwatch_exporter
+wget -O /opt/cloudwatch_exporter/cloudwatch_exporter.jar \
+  "https://github.com/prometheus/cloudwatch_exporter/releases/download/v${cloudwatch_exporter_version}/cloudwatch_exporter-${cloudwatch_exporter_version}-jar-with-dependencies.jar"
+
+cat >/etc/cloudwatch_exporter/config.yml <<'CLOUDWATCH_EXPORTER_CONFIG'
+region: ${aws_region}
+period_seconds: 300
+delay_seconds: 60
+metrics:
+  - aws_namespace: AWS/ECS
+    aws_metric_name: CPUUtilization
+    aws_dimensions: [ClusterName, ServiceName]
+    aws_dimension_select:
+      ClusterName: [${ecs_cluster_name}]
+    aws_statistics: [Average, Maximum]
+  - aws_namespace: AWS/ECS
+    aws_metric_name: MemoryUtilization
+    aws_dimensions: [ClusterName, ServiceName]
+    aws_dimension_select:
+      ClusterName: [${ecs_cluster_name}]
+    aws_statistics: [Average, Maximum]
+  - aws_namespace: ECS/ContainerInsights
+    aws_metric_name: RunningTaskCount
+    aws_dimensions: [ClusterName, ServiceName]
+    aws_dimension_select:
+      ClusterName: [${ecs_cluster_name}]
+    aws_statistics: [Average]
+CLOUDWATCH_EXPORTER_CONFIG
+
+cat >/etc/systemd/system/cloudwatch_exporter.service <<'CLOUDWATCH_EXPORTER_SERVICE'
+[Unit]
+Description=Prometheus CloudWatch Exporter for ECS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=prometheus
+Group=prometheus
+ExecStart=/usr/bin/java -jar /opt/cloudwatch_exporter/cloudwatch_exporter.jar 9106 /etc/cloudwatch_exporter/config.yml
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+CLOUDWATCH_EXPORTER_SERVICE
+
+cat >>/etc/prometheus/prometheus.yml <<'PROMETHEUS_CLOUDWATCH'
+
+  - job_name: ecs-cloudwatch
+    static_configs:
+      - targets: ["localhost:9106"]
+PROMETHEUS_CLOUDWATCH
+%{ endif ~}
 
 chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 chown prometheus:prometheus /usr/local/bin/prometheus /usr/local/bin/promtool
@@ -140,5 +223,5 @@ datasources:
 GRAFANA_DATASOURCE
 
 systemctl daemon-reload
-systemctl enable node_exporter blackbox_exporter prometheus grafana-server
-systemctl start node_exporter blackbox_exporter prometheus grafana-server
+systemctl enable node_exporter blackbox_exporter prometheus grafana-server%{ if ecs_cluster_name != "" } cloudwatch_exporter%{ endif }
+systemctl start node_exporter blackbox_exporter prometheus grafana-server%{ if ecs_cluster_name != "" } cloudwatch_exporter%{ endif }

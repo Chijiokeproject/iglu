@@ -47,6 +47,23 @@ variable "private_subnet_cidrs" {
   }
 }
 
+variable "database_subnet_cidrs" {
+  type        = list(string)
+  description = "CIDR blocks for isolated database subnets. An empty list disables the database tier."
+  default     = []
+
+  validation {
+    condition     = alltrue([for cidr in var.database_subnet_cidrs : can(cidrnetmask(cidr))])
+    error_message = "Every database subnet CIDR must be a valid IPv4 CIDR block."
+  }
+}
+
+variable "nat_gateway_per_az" {
+  type        = bool
+  description = "Create one NAT gateway and private route table per availability zone for production resilience."
+  default     = false
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to all VPC resources."

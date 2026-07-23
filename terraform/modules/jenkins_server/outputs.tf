@@ -1,21 +1,16 @@
-output "instance_id" {
-  description = "Jenkins EC2 instance IDs."
-  value       = aws_instance.jenkins[*].id
+output "autoscaling_group_name" {
+  description = "Jenkins controller Auto Scaling Group name."
+  value       = aws_autoscaling_group.jenkins.name
 }
 
-output "public_ip" {
-  description = "Jenkins public IP addresses."
-  value       = aws_instance.jenkins[*].public_ip
-}
-
-output "private_ip" {
-  description = "Jenkins private IP addresses."
-  value       = aws_instance.jenkins[*].private_ip
+output "efs_file_system_id" {
+  description = "Encrypted EFS file system storing JENKINS_HOME."
+  value       = aws_efs_file_system.jenkins_home.id
 }
 
 output "url" {
   description = "Jenkins web URL through the load balancer."
-  value       = "${var.acm_certificate_arn == null ? "http" : "https"}://${aws_lb.jenkins.dns_name}"
+  value       = "${var.enable_https ? "https" : "http"}://${aws_lb.jenkins.dns_name}"
 }
 
 output "load_balancer_dns_name" {

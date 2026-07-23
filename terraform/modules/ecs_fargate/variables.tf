@@ -90,6 +90,24 @@ variable "container_port" {
   }
 }
 
+variable "database_endpoint" {
+  type        = string
+  description = "Optional private PostgreSQL endpoint exposed to the application container."
+  default     = null
+}
+
+variable "database_name" {
+  type        = string
+  description = "Optional PostgreSQL database name."
+  default     = null
+}
+
+variable "database_secret_arn" {
+  type        = string
+  description = "Optional Secrets Manager ARN whose JSON contains username and password keys."
+  default     = null
+}
+
 variable "desired_count" {
   type        = number
   description = "Number of ECS tasks to run."
@@ -99,6 +117,23 @@ variable "desired_count" {
     condition     = var.desired_count >= 1
     error_message = "desired_count must be at least 1."
   }
+}
+
+variable "max_capacity" {
+  type        = number
+  description = "Maximum ECS task count used by target-tracking autoscaling."
+  default     = 6
+
+  validation {
+    condition     = var.max_capacity >= var.desired_count
+    error_message = "max_capacity must be greater than or equal to desired_count."
+  }
+}
+
+variable "autoscaling_cpu_target" {
+  type        = number
+  description = "Average CPU percentage that ECS target-tracking autoscaling maintains."
+  default     = 60
 }
 
 variable "task_cpu" {

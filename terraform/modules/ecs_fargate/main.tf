@@ -1,5 +1,10 @@
 resource "aws_ecs_cluster" "this" {
   name = "${local.name_prefix}-ecs-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enhanced"
+  }
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-ecs-cluster"
   })
@@ -191,7 +196,20 @@ locals {
       }
     ]
     essential = true
-    environment = var.enable_datadog ? [
+    environment = concat(var.database_endpoint == null ? [] : [
+      {
+        name  = "DB_HOST"
+        value = var.database_endpoint
+      },
+      {
+        name  = "DB_PORT"
+        value = "5432"
+      },
+      {
+        name  = "DB_NAME"
+        value = var.database_name
+      }
+      ], var.enable_datadog ? [
       {
         name  = "DD_AGENT_HOST"
         value = "127.0.0.1"
@@ -204,7 +222,17 @@ locals {
         name  = "DD_SERVICE"
         value = local.name_prefix
       }
-    ] : []
+    ] : [])
+    secrets = var.database_secret_arn == null ? [] : [
+      {
+        name      = "DB_USERNAME"
+        valueFrom = "${var.database_secret_arn}:username::"
+      },
+      {
+        name      = "DB_PASSWORD"
+        valueFrom = "${var.database_secret_arn}:password::"
+      }
+    ]
     logConfiguration = local.datadog_logs_enabled ? {
       logDriver = "awsfirelens"
       options = {
@@ -344,6 +372,21 @@ resource "aws_iam_role_policy" "datadog_api_key" {
   policy = data.aws_iam_policy_document.datadog_api_key[0].json
 }
 
+data "aws_iam_policy_document" "database_secret" {
+  count = var.database_secret_arn == null ? 0 : 1
+  statement {
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.database_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "database_secret" {
+  count  = var.database_secret_arn == null ? 0 : 1
+  name   = "${local.name_prefix}-database-secret"
+  role   = aws_iam_role.task_execution.id
+  policy = data.aws_iam_policy_document.database_secret[0].json
+}
+
 resource "aws_iam_role" "task" {
   name               = "${local.name_prefix}-ecs-task-role"
   assume_role_policy = data.aws_iam_policy_document.ecs_task_execution.json
@@ -370,6 +413,14 @@ resource "aws_ecs_task_definition" "app" {
       condition     = !var.enable_datadog || local.datadog_api_key_secret_arn != null
       error_message = "Create the Datadog API-key secret or set datadog_api_key_secret_arn when enable_datadog is true."
     }
+    precondition {
+      condition = (
+        var.database_endpoint == null && var.database_name == null && var.database_secret_arn == null
+        ) || (
+        var.database_endpoint != null && var.database_name != null && var.database_secret_arn != null
+      )
+      error_message = "database_endpoint, database_name, and database_secret_arn must be set together."
+    }
   }
 
   tags = merge(var.tags, {
@@ -378,11 +429,22 @@ resource "aws_ecs_task_definition" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  name            = "${local.name_prefix}-service"
-  cluster         = aws_ecs_cluster.this.id
-  task_definition = aws_ecs_task_definition.app.arn
-  desired_count   = var.desired_count
-  launch_type     = "FARGATE"
+  name                              = "${local.name_prefix}-service"
+  cluster                           = aws_ecs_cluster.this.id
+  task_definition                   = aws_ecs_task_definition.app.arn
+  desired_count                     = var.desired_count
+  launch_type                       = "FARGATE"
+  platform_version                  = "LATEST"
+  enable_execute_command            = true
+  health_check_grace_period_seconds = 60
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  deployment_minimum_healthy_percent = 100
+  deployment_maximum_percent         = 200
 
   network_configuration {
     subnets          = var.private_subnet_ids
@@ -400,4 +462,29 @@ resource "aws_ecs_service" "app" {
   tags = merge(var.tags, {
     Name = "${local.name_prefix}-ecs-service"
   })
+}
+
+resource "aws_appautoscaling_target" "ecs" {
+  max_capacity       = var.max_capacity
+  min_capacity       = var.desired_count
+  resource_id        = "service/${aws_ecs_cluster.this.name}/${aws_ecs_service.app.name}"
+  scalable_dimension = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
+
+resource "aws_appautoscaling_policy" "cpu" {
+  name               = "${local.name_prefix}-cpu-scaling"
+  policy_type        = "TargetTrackingScaling"
+  resource_id        = aws_appautoscaling_target.ecs.resource_id
+  scalable_dimension = aws_appautoscaling_target.ecs.scalable_dimension
+  service_namespace  = aws_appautoscaling_target.ecs.service_namespace
+
+  target_tracking_scaling_policy_configuration {
+    target_value       = var.autoscaling_cpu_target
+    scale_in_cooldown  = 300
+    scale_out_cooldown = 60
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+  }
 }

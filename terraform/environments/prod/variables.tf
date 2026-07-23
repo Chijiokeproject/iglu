@@ -61,6 +61,61 @@ variable "prod_subdomain" {
   default     = "prod"
 }
 
+variable "container_image" {
+  type        = string
+  description = "Immutable application image URI. Push a release tag to the ECR repository and set this value to that URI."
+  default     = "nginxinc/nginx-unprivileged:stable"
+}
+
+variable "bastion_ami_id" {
+  type        = string
+  description = "AMI used by the production administrative jump host."
+  default     = "ami-037b1265ce539a36b"
+}
+
+variable "bastion_instance_type" {
+  type        = string
+  description = "RHEL-compatible bastion instance type."
+  default     = "t3.micro"
+
+  validation {
+    condition     = var.bastion_instance_type != "t3.nano"
+    error_message = "The configured RHEL AMI does not support t3.nano; use t3.micro or larger."
+  }
+}
+
+variable "bastion_key_name" {
+  type        = string
+  description = "Optional EC2 key pair enabling restricted SSH. Null keeps the bastion Session-Manager-only."
+  default     = null
+}
+
+variable "database_name" {
+  type    = string
+  default = "iglu"
+}
+
+variable "database_instance_class" {
+  type    = string
+  default = "db.t4g.small"
+}
+
+variable "database_allocated_storage" {
+  type    = number
+  default = 50
+}
+
+variable "database_backup_retention_period" {
+  type    = number
+  default = 14
+}
+
+variable "database_deletion_protection" {
+  type        = bool
+  description = "Protect the production database from accidental deletion."
+  default     = true
+}
+
 variable "enable_datadog" {
   type        = bool
   description = "Enable the Datadog Agent sidecar for ECS Fargate."

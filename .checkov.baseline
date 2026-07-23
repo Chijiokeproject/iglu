@@ -1,0 +1,272 @@
+{
+    "failed_checks": [
+        {
+            "file": "/terraform/modules/bastion_host/main.tf",
+            "findings": [
+                {
+                    "resource": "module.bastion.aws_instance.this",
+                    "check_ids": [
+                        "CKV_AWS_135",
+                        "CKV_AWS_88"
+                    ]
+                },
+                {
+                    "resource": "module.bastion.aws_security_group.this",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/database/main.tf",
+            "findings": [
+                {
+                    "resource": "module.database.aws_db_instance.this",
+                    "check_ids": [
+                        "CKV2_AWS_30",
+                        "CKV_AWS_118",
+                        "CKV_AWS_161",
+                        "CKV_AWS_354"
+                    ]
+                },
+                {
+                    "resource": "module.database.aws_security_group.this",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                },
+                {
+                    "resource": "module.sonarqube_database.aws_db_instance.this",
+                    "check_ids": [
+                        "CKV2_AWS_30",
+                        "CKV_AWS_118",
+                        "CKV_AWS_161",
+                        "CKV_AWS_354"
+                    ]
+                },
+                {
+                    "resource": "module.sonarqube_database.aws_security_group.this",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/devops_tools/main.tf",
+            "findings": [
+                {
+                    "resource": "module.devops_tools.aws_instance.this[\"nexus\"]",
+                    "check_ids": [
+                        "CKV_AWS_135"
+                    ]
+                },
+                {
+                    "resource": "module.devops_tools.aws_instance.this[\"sonarqube\"]",
+                    "check_ids": [
+                        "CKV_AWS_135"
+                    ]
+                },
+                {
+                    "resource": "module.devops_tools.aws_lb_target_group.this[\"nexus\"]",
+                    "check_ids": [
+                        "CKV_AWS_378"
+                    ]
+                },
+                {
+                    "resource": "module.devops_tools.aws_lb_target_group.this[\"sonarqube\"]",
+                    "check_ids": [
+                        "CKV_AWS_378"
+                    ]
+                },
+                {
+                    "resource": "module.devops_tools.aws_security_group.this",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/ecr/main.tf",
+            "findings": [
+                {
+                    "resource": "module.ecr.aws_ecr_repository.this",
+                    "check_ids": [
+                        "CKV_AWS_136"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/ecs_fargate/main.tf",
+            "findings": [
+                {
+                    "resource": "module.ecs_fargate.aws_cloudwatch_log_group.app",
+                    "check_ids": [
+                        "CKV_AWS_158",
+                        "CKV_AWS_338"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_lb.app",
+                    "check_ids": [
+                        "CKV2_AWS_28",
+                        "CKV_AWS_131",
+                        "CKV_AWS_150",
+                        "CKV_AWS_91"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_secretsmanager_secret.datadog_api_key",
+                    "check_ids": [
+                        "CKV2_AWS_57"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_secretsmanager_secret.datadog_app_key",
+                    "check_ids": [
+                        "CKV2_AWS_57",
+                        "CKV_AWS_149"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_secretsmanager_secret.datadog_app_key[0]",
+                    "check_ids": [
+                        "CKV2_AWS_57",
+                        "CKV_AWS_149"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_security_group.alb",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_260",
+                        "CKV_AWS_382"
+                    ]
+                },
+                {
+                    "resource": "module.ecs_fargate.aws_security_group.ecs_service",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/jenkins_server/main.tf",
+            "findings": [
+                {
+                    "resource": "module.jenkins_server.aws_efs_file_system.jenkins_home",
+                    "check_ids": [
+                        "CKV_AWS_184"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_lb.jenkins",
+                    "check_ids": [
+                        "CKV2_AWS_20",
+                        "CKV2_AWS_28",
+                        "CKV_AWS_131",
+                        "CKV_AWS_150",
+                        "CKV_AWS_91"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_lb_listener.http",
+                    "check_ids": [
+                        "CKV_AWS_103"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_lb_target_group.jenkins",
+                    "check_ids": [
+                        "CKV_AWS_378"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_security_group.alb",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_security_group.efs",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                },
+                {
+                    "resource": "module.jenkins_server.aws_security_group.jenkins",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/monitoring_server/main.tf",
+            "findings": [
+                {
+                    "resource": "module.monitoring_server.aws_instance.monitoring",
+                    "check_ids": [
+                        "CKV_AWS_135",
+                        "CKV_AWS_88"
+                    ]
+                },
+                {
+                    "resource": "module.monitoring_server.aws_lb_target_group.grafana",
+                    "check_ids": [
+                        "CKV_AWS_378"
+                    ]
+                },
+                {
+                    "resource": "module.monitoring_server.aws_lb_target_group.prometheus",
+                    "check_ids": [
+                        "CKV_AWS_378"
+                    ]
+                },
+                {
+                    "resource": "module.monitoring_server.aws_security_group.monitoring",
+                    "check_ids": [
+                        "CKV_AWS_23",
+                        "CKV_AWS_382"
+                    ]
+                }
+            ]
+        },
+        {
+            "file": "/terraform/modules/vpc/main.tf",
+            "findings": [
+                {
+                    "resource": "module.vpc.aws_subnet.public[0]",
+                    "check_ids": [
+                        "CKV_AWS_130"
+                    ]
+                },
+                {
+                    "resource": "module.vpc.aws_subnet.public[1]",
+                    "check_ids": [
+                        "CKV_AWS_130"
+                    ]
+                },
+                {
+                    "resource": "module.vpc.aws_vpc.this",
+                    "check_ids": [
+                        "CKV2_AWS_11",
+                        "CKV2_AWS_12"
+                    ]
+                }
+            ]
+        }
+    ]
+}

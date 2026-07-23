@@ -43,37 +43,15 @@ variable "jenkins_ami_id" {
   }
 }
 
-variable "jenkins_instance_count" {
-  type        = number
-  description = "Run exactly one Jenkins controller."
-  default     = 1
-
-  validation {
-    condition     = var.jenkins_instance_count == 1
-    error_message = "jenkins_instance_count must be exactly 1."
-  }
+variable "jenkins_attach_admin_policy" {
+  type        = bool
+  description = "Attach AdministratorAccess to Jenkins. Disabled by default; prefer a scoped deployment role."
+  default     = false
 }
 
-variable "monitoring_instance_type" {
-  type        = string
-  description = "EC2 instance type for Prometheus and Grafana."
-  default     = "t3.small"
-}
-
-variable "monitoring_ami_id" {
-  type        = string
-  description = "Red Hat Enterprise Linux AMI ID for the monitoring EC2 instance."
-  default     = "ami-037b1265ce539a36b"
-
-  validation {
-    condition     = startswith(var.monitoring_ami_id, "ami-")
-    error_message = "monitoring_ami_id must be a valid AMI ID starting with ami-."
-  }
-}
-
-variable "additional_http_probe_targets" {
+variable "ecr_repository_arns" {
   type        = list(string)
-  description = "Additional HTTP URLs for Prometheus Blackbox Exporter to monitor."
+  description = "ECR repository ARNs Jenkins is allowed to push to."
   default     = []
 }
 

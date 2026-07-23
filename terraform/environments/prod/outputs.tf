@@ -3,6 +3,16 @@ output "prod_cluster_id" {
   value       = module.ecs_fargate.cluster_id
 }
 
+output "prod_cluster_name" {
+  description = "ECS cluster name verified by the Jenkins pipeline."
+  value       = module.ecs_fargate.cluster_name
+}
+
+output "prod_service_name" {
+  description = "ECS service name verified by the Jenkins pipeline."
+  value       = module.ecs_fargate.service_name
+}
+
 output "prod_alb_dns_name" {
   description = "Application Load Balancer DNS name for prod environment."
   value       = module.ecs_fargate.load_balancer_dns_name
@@ -54,4 +64,25 @@ output "prod_datadog_app_key_secret_arn" {
 output "prod_monitoring_instance_id" {
   description = "Monitoring EC2 instance ID for prod."
   value       = module.monitoring_server.instance_id
+}
+
+output "prod_ecr_repository_url" {
+  description = "Production ECR repository for application images."
+  value       = module.ecr.repository_url
+}
+
+output "prod_database_endpoint" {
+  description = "Private RDS PostgreSQL endpoint."
+  value       = module.database.endpoint
+}
+
+output "prod_database_secret_arn" {
+  description = "Secrets Manager ARN holding the RDS master credentials."
+  value       = module.database.master_user_secret_arn
+  sensitive   = true
+}
+
+output "prod_bastion_instance_id" {
+  description = "Production jump host instance ID for Session Manager."
+  value       = module.bastion.instance_id
 }

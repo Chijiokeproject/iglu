@@ -99,14 +99,17 @@ module "ecs_fargate" {
   datadog_logs_enabled        = var.datadog_logs_enabled
   datadog_apm_enabled         = var.datadog_apm_enabled
   tags                        = local.tags
+  depends_on                  = [module.vpc]
 }
 
 module "monitoring_server" {
   source                          = "./terraform/modules/monitoring_server"
   project                         = local.project
   environment                     = local.environment
+  aws_region                      = "us-east-1"
   vpc_id                          = module.vpc.vpc_id
-  subnet_id                       = module.vpc.public_subnet_ids[1]
+  subnet_id                       = module.vpc.private_subnet_ids[1]
+  associate_public_ip_address     = false
   load_balancer_security_group_id = module.ecs_fargate.load_balancer_security_group_id
   https_listener_arn              = module.ecs_fargate.https_listener_arn
   grafana_hostname                = local.grafana_fqdn
@@ -114,12 +117,14 @@ module "monitoring_server" {
   allowed_admin_cidr              = var.allowed_admin_cidr
   instance_type                   = var.monitoring_instance_type
   ami_id                          = var.monitoring_ami_id
+  ecs_cluster_name                = module.ecs_fargate.cluster_name
   http_probe_targets = concat([
     "https://${local.dev_fqdn}",
     "http://localhost:3000/login",
     "http://localhost:9090/-/healthy"
   ], var.additional_http_probe_targets)
-  tags = local.tags
+  tags       = local.tags
+  depends_on = [module.vpc]
 }
 
 resource "aws_route53_record" "dev" {

@@ -13,7 +13,17 @@ output "private_subnet_ids" {
   value       = aws_subnet.private[*].id
 }
 
+output "database_subnet_ids" {
+  description = "IDs of isolated database subnets."
+  value       = aws_subnet.database[*].id
+}
+
 output "nat_gateway_id" {
-  description = "The NAT Gateway ID."
+  description = "The primary NAT Gateway ID."
   value       = aws_nat_gateway.this.id
+}
+
+output "nat_gateway_ids" {
+  description = "IDs of all NAT gateways."
+  value       = concat([aws_nat_gateway.this.id], aws_nat_gateway.secondary[*].id)
 }

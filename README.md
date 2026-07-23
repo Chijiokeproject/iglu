@@ -1,7 +1,7 @@
 # iglu
 
-Deploying an application using AWS ECS Fargate, Terraform, Jenkins, Route 53,
-Datadog, Prometheus, and Grafana.
+Deploying an application using AWS ECS Fargate, RDS PostgreSQL, ECR, Terraform,
+Jenkins, Nexus, SonarQube, Route 53, Datadog, Prometheus, and Grafana.
 
 This project uses Jenkins, not GitHub Actions, to deploy the Terraform
 infrastructure.
@@ -16,13 +16,19 @@ infrastructure.
 - `terraform/modules/ecs_fargate` - reusable ECS Fargate module with optional Datadog sidecar
 - `terraform/modules/jenkins_server` - Jenkins EC2 module
 - `terraform/modules/monitoring_server` - Prometheus and Grafana EC2 module
-- `terraform/environments/jenkins` - Jenkins and monitoring environment
+- `terraform/modules/bastion_host` - hardened jump host with Session Manager and optional restricted SSH
+- `terraform/modules/database` - private encrypted Multi-AZ RDS PostgreSQL
+- `terraform/modules/ecr` - immutable, scan-on-push application image repository
+- `terraform/modules/devops_tools` - private Nexus and SonarQube servers
+- `terraform/environments/jenkins` - Jenkins bootstrap only: CI VPC, public ALB, and one private Jenkins controller
+- `terraform/environments/tools` - shared pipeline services: bastion, Nexus, SonarQube/RDS, Prometheus, and Grafana
 - `terraform/environments/prod` - production ECS environment
 
 Run development Terraform commands directly from the `IGLU.COM` repository
-root. Run Jenkins and production commands from their respective directories
-under `terraform/environments`. The `terraform` directory itself only contains
-modules and additional environments, so it is not a runnable stack.
+root. Run Jenkins, tools, and production commands from their respective
+directories under `terraform/environments`. The `terraform` directory itself
+only contains modules and additional environments, so it is not a runnable
+stack.
 
 Before applying, confirm that the AWS credentials point to the intended account
 and that these prerequisites exist:
@@ -48,7 +54,7 @@ The backend uses:
 
 ## Jenkins
 
-Create the Jenkins servers:
+Create the remote-state backend, then bootstrap Jenkins:
 
 ```sh
 cd terraform/environments/jenkins
@@ -57,31 +63,30 @@ terraform plan
 terraform apply
 ```
 
-The Jenkins environment creates one Jenkins controller and fronts it with an
-Application Load Balancer. Terraform requests and DNS-validates an ACM
-certificate for Jenkins, Grafana, and Prometheus using the existing public
-Route 53 zone. Public HTTP requests on port `80` redirect permanently to HTTPS
-on port `443`.
+This stack creates only the CI network, a one-controller Auto Scaling Group
+spanning both private subnets, encrypted EFS storage for `JENKINS_HOME`, its
+two-AZ internet-facing Application Load Balancer, certificate, and DNS record.
+The ASG is deliberately capped at one active controller to avoid Jenkins
+split-brain, but can replace it in the other Availability Zone. EFS automatic
+backups preserve controller configuration across replacement. The stack does
+not create bastion, Nexus, SonarQube, RDS, monitoring, dev, or prod resources.
+Terraform requests and DNS-validates an ACM certificate for Jenkins using the
+existing public Route 53 zone. Public HTTP requests on port `80` redirect
+permanently to HTTPS on port `443`.
 
 To use an existing certificate instead, provide an ACM certificate from the
-same region that covers all three Jenkins environment hostnames:
+same region that covers the Jenkins hostname:
 
 ```sh
 terraform apply \
   -var='jenkins_acm_certificate_arn=arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERTIFICATE_ID'
 ```
 
-The Jenkins and monitoring EC2 modules use Red Hat Enterprise Linux AMIs passed
-as variables. The modules do not look up AMIs with Terraform data blocks.
+The Jenkins EC2 module uses a Red Hat Enterprise Linux AMI passed as a
+variable. It does not look up AMIs with Terraform data blocks.
 
-To change the number of instances:
-
-```sh
-terraform apply \
-  -var='jenkins_instance_count=2'
-```
-
-To restrict Jenkins, Grafana, and Prometheus access to your own public IP:
+The stack intentionally runs one Jenkins controller. Restrict Jenkins access
+to your own public IP:
 
 ```sh
 terraform apply \
@@ -93,8 +98,6 @@ Useful outputs:
 ```sh
 terraform output jenkins_url
 terraform output jenkins_dns_url
-terraform output grafana_url
-terraform output prometheus_url
 ```
 
 The Jenkins initial admin password is on the instance at:
@@ -103,10 +106,16 @@ The Jenkins initial admin password is on the instance at:
 /home/ec2-user/jenkins-initial-admin-password.txt
 ```
 
-EC2 instances do not allow SSH. Use AWS Systems Manager Session Manager instead:
+EC2 instances do not allow SSH. Resolve the current ASG member by tag and use
+AWS Systems Manager Session Manager:
 
 ```sh
-aws ssm start-session --target JENKINS_INSTANCE_ID --region us-east-1
+JENKINS_INSTANCE_ID=$(aws ec2 describe-instances \
+  --region us-east-1 \
+  --filters Name=tag:Name,Values=iglu-jenkins-jenkins Name=instance-state-name,Values=running \
+  --query 'Reservations[0].Instances[0].InstanceId' \
+  --output text)
+aws ssm start-session --target "$JENKINS_INSTANCE_ID" --region us-east-1
 sudo cat /home/ec2-user/jenkins-initial-admin-password.txt
 ```
 
@@ -114,8 +123,9 @@ Create a Jenkins Pipeline job that uses `Jenkinsfile`.
 
 Pipeline parameters:
 
-- `ENVIRONMENT`: `dev` or `prod`
+- `ENVIRONMENT`: `dev` or `prod`; the shared tools stack is an automatic pipeline stage
 - `ACTION`: `plan`, `apply`, or `destroy`
+- `PRODUCTION_CONFIRMATION`: must be exactly `DEPLOY_PROD` for production apply or destroy
 - `ENABLE_DATADOG`: enable the Datadog ECS Fargate sidecar
 - `DATADOG_API_KEY_SECRET_ARN`: Secrets Manager ARN for the Datadog API key
 - `DATADOG_API_KEY_SECRET_NAME`: optional API-key secret name override
@@ -123,6 +133,16 @@ Pipeline parameters:
 - `DATADOG_SITE`: Datadog site, for example `datadoghq.com`
 - `MONITORING_AMI_ID`: optional Red Hat Enterprise Linux AMI ID override for the monitoring server; blank uses the Terraform environment default
 - `ALLOWED_ADMIN_CIDR`: optional restricted public CIDR override for Grafana and Prometheus; blank uses the Terraform environment default
+
+Bootstrapping Jenkins does not execute this pipeline, and the `Jenkinsfile`
+declares no automatic trigger. Its safe defaults are `ENVIRONMENT=dev` and
+`ACTION=plan`. Production apply or destroy additionally requires both Jenkins'
+manual approval and the exact `PRODUCTION_CONFIRMATION=DEPLOY_PROD` value.
+For `plan` and `apply`, the pipeline processes the shared tools stack first and
+then the selected application environment. A selected-environment `destroy`
+retains shared tools so deleting dev cannot disrupt tools also used by prod.
+Concurrent builds of this pipeline job are disabled because dev and prod both
+plan against the same locked tools state.
 
 ## Route 53 DNS
 
@@ -136,8 +156,8 @@ chijiokedevops.com
 Terraform creates:
 
 - `jenkins.chijiokedevops.com` -> Jenkins application load balancer
-- `grafana.jenkins.chijiokedevops.com` -> Jenkins monitoring server
-- `prometheus.jenkins.chijiokedevops.com` -> Jenkins monitoring server
+- the shared `tools` stack creates `grafana.jenkins`, `prometheus.jenkins`,
+  `nexus.jenkins`, and `sonar.jenkins` records against the shared CI load balancer
 - `dev.chijiokedevops.com` -> dev application load balancer
 - `grafana.dev.chijiokedevops.com` -> dev monitoring server
 - `prometheus.dev.chijiokedevops.com` -> dev monitoring server
@@ -145,12 +165,10 @@ Terraform creates:
 - `grafana.prod.chijiokedevops.com` -> prod monitoring server
 - `prometheus.prod.chijiokedevops.com` -> prod monitoring server
 
-Each stack requests a DNS-validated ACM certificate for its three hostnames.
-Application, Jenkins, Grafana, and Prometheus traffic terminates TLS at the
-environment's shared Application Load Balancer. Host-based rules route Grafana
-and Prometheus only for the restricted admin CIDR. Port `80` is retained only
-for redirects to HTTPS; backend traffic from the load balancer to ECS or EC2
-remains private HTTP.
+Each independent stack requests only the certificates it owns. The tools stack
+adds its certificate and host rules to the Jenkins ALB after Jenkins exists.
+Administrative host rules are restricted to the configured admin CIDR.
+Backend traffic from load balancers to ECS or EC2 remains private HTTP.
 
 Useful outputs:
 
@@ -164,9 +182,10 @@ Set `create_route53_record = false` only when DNS is managed externally, and
 provide an existing `acm_certificate_arn` (or
 `jenkins_acm_certificate_arn`) covering the configured hostnames.
 
-Note: this creates multiple Jenkins controllers behind one ALB for lab-level
-availability. Production Jenkins HA needs a deeper controller state and plugin
-strategy before active/active use.
+The CI stack intentionally keeps one active Jenkins controller. Auto Scaling
+provides host/AZ recovery rather than active-active Jenkins. Encrypted,
+backed-up EFS keeps controller state durable; restoration and plugin upgrades
+must still be tested regularly.
 
 ## Dev And Prod
 
@@ -195,6 +214,82 @@ terraform apply \
   -var='monitoring_ami_id=ami-REPLACE_WITH_RHEL_AMI_ID' \
   -var='allowed_admin_cidr=YOUR_PUBLIC_IP/32'
 ```
+
+Production additionally creates two isolated database subnets, one NAT gateway
+per availability zone, a Session-Manager-enabled bastion host, an encrypted
+Multi-AZ RDS PostgreSQL database, and an ECR repository. ECS tasks receive the
+database endpoint plus credentials from Secrets Manager; credentials are not
+stored in Terraform variables or container definitions.
+
+Build and push each application image with an immutable release tag, then pass
+the complete image URI to Terraform:
+
+```sh
+ECR_URL=$(terraform output -raw prod_ecr_repository_url)
+aws ecr get-login-password --region us-east-1 | podman login --username AWS --password-stdin "${ECR_URL%%/*}"
+podman build -t "$ECR_URL:release-GIT_SHA" .
+podman push "$ECR_URL:release-GIT_SHA"
+terraform apply -var="container_image=$ECR_URL:release-GIT_SHA"
+```
+
+## Shared Private CI/CD Services
+
+After Jenkins is running, selecting either `dev` or `prod` in the pipeline
+plans the tools stack first. `ACTION=apply` applies tools before it applies the
+selected application environment:
+
+```sh
+terraform -chdir=terraform/environments/tools init
+terraform -chdir=terraform/environments/tools plan
+terraform -chdir=terraform/environments/tools apply
+```
+
+The tools stack reads network and load-balancer outputs from the Jenkins remote
+state. It creates the bastion, Prometheus/Grafana, Nexus, SonarQube, and the
+SonarQube PostgreSQL database. These shared resources continue to use
+`tools/terraform.tfstate`; keeping a separate state prevents either dev or prod
+from claiming ownership of them. The pipeline does not destroy shared tools
+when one application environment is destroyed. Use the manual tools commands
+only for an intentional shared-tools teardown or maintenance operation.
+
+Docker Engine, Buildx, Compose, Maven, Podman, AWS CLI, Java, and pinned Checkov
+remain installed on Jenkins because they are build executables, not additional
+servers. The pipeline audits this toolchain before it plans shared tools and
+the selected `dev` or `prod` environment.
+An idempotent Systems Manager association installs or repairs this toolchain on
+existing controllers and briefly restarts Jenkins to activate Docker group
+membership; the EC2 controller is not replaced for this bootstrap change.
+SonarQube uses a dedicated Multi-AZ PostgreSQL database; Nexus and SonarQube
+data volumes are encrypted and retained when their instances are terminated.
+
+Dev and prod run on ECS Fargate, so Docker is intentionally not installed on
+application hosts: AWS manages the host container runtime. Docker is installed
+only on Jenkins, where application images are built and pushed to ECR.
+
+After the production stack creates ECR, allow Jenkins to push only to that
+repository:
+
+```sh
+cd terraform/environments/jenkins
+terraform apply \
+  -var='allowed_admin_cidr=YOUR_PUBLIC_IP/32' \
+  -var='ecr_repository_arns=["arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/iglu/prod/app"]'
+```
+
+The default Jenkins instance role deliberately does not receive
+`AdministratorAccess`. Configure a separate, scoped Terraform deployment role
+for the pipeline. The compatibility switch
+`jenkins_attach_admin_policy = true` exists for labs only.
+
+Administrative shell access uses Session Manager by default:
+
+```sh
+aws ssm start-session \
+  --target "$(terraform -chdir=terraform/environments/tools output -raw bastion_instance_id)" \
+  --region us-east-1
+```
+
+Setting `bastion_key_name` enables SSH only from `allowed_admin_cidr`.
 
 ## ECS Fargate Networking And Logs
 
@@ -296,13 +391,14 @@ Each environment includes monitoring with:
 - Grafana behind an HTTPS ALB, with private backend port `3000`
 - Node Exporter for host metrics
 - Blackbox Exporter for HTTP health checks
+- Prometheus CloudWatch Exporter for ECS cluster/service metrics
 
 Prometheus monitors:
 
-- Jenkins host metrics on port `9100`
+- Jenkins ASG host metrics on port `9100`, discovered dynamically from EC2 tags
 - Monitoring host metrics on port `9100`
-- Jenkins web health on port `8080`
 - Jenkins public HTTPS health at `https://jenkins.chijiokedevops.com/login`
+- ECS CPU, memory, and running-task metrics from CloudWatch/Container Insights
 - Dev ECS application health through the dev ALB
 - Prod ECS application health through the prod ALB
 - Grafana web health on port `3000`
@@ -312,6 +408,20 @@ Grafana default login:
 
 - Username: `admin`
 - Password: `admin`
+
+The ECS clusters enable Container Insights with enhanced observability.
+Prometheus reads their CloudWatch metrics through the CloudWatch Exporter and
+Grafana uses Prometheus as its default datasource. Datadog remains the
+application/container telemetry path when `ENABLE_DATADOG=true`.
+
+## Checkov Infrastructure Scanning
+
+Jenkins installs Checkov `3.3.8` in an isolated Python virtual environment.
+Every pipeline run scans all Terraform before planning. The initial audit found
+338 passing checks and 63 pre-existing failures. Those findings are recorded in
+`.checkov.baseline`; they remain technical debt, while any newly introduced
+failure blocks the pipeline. Update the baseline only after deliberately
+reviewing the complete scan, never merely to make a build green.
 
 Dev monitoring outputs:
 
@@ -362,9 +472,33 @@ terraform destroy
 terraform -chdir=terraform/environments/prod init
 terraform -chdir=terraform/environments/prod destroy
 
+terraform -chdir=terraform/environments/tools init
+terraform -chdir=terraform/environments/tools destroy
+
 terraform -chdir=terraform/environments/jenkins init
 terraform -chdir=terraform/environments/jenkins destroy
 ```
+
+The tools stack's SonarQube database has deletion protection enabled by default. Teardown is
+therefore intentionally two-phase: first disable protection in-place while
+retaining the final snapshot, then run destroy with the same variable value:
+
+```sh
+terraform -chdir=terraform/environments/tools apply \
+  -target=module.sonarqube_database.aws_db_instance.this \
+  -var='sonarqube_database_deletion_protection=false'
+
+terraform -chdir=terraform/environments/tools destroy \
+  -var='sonarqube_database_deletion_protection=false'
+```
+
+When no explicit final snapshot name is supplied, Terraform generates and
+retains a stable random suffix for the database lifecycle, preventing a final
+snapshot from colliding with one created by an earlier teardown. You can still
+override it in both commands with
+`-var='sonarqube_database_final_snapshot_identifier=UNIQUE_NAME'`. Set
+`sonarqube_database_skip_final_snapshot=true` only when permanent data loss is
+explicitly intended.
 
 After the infrastructure is destroyed, delete the remote state S3 bucket and
 DynamoDB lock table from the repository root:
@@ -381,6 +515,6 @@ Type `DELETE` when prompted.
 - Do not commit generated `terraform.tfstate` files.
 - Replace backend bucket and lock table names with production-safe values before production use.
 - Store the Datadog API key only in AWS Secrets Manager or another secret manager.
-- The Jenkins EC2 role currently attaches `AdministratorAccess` so Terraform can deploy this lab infrastructure. Replace it with least-privilege IAM before production use.
+- The Jenkins EC2 role does not attach `AdministratorAccess` by default. Configure a scoped deployment role before running Terraform from Jenkins.
 # iglu
 Deploying Application Using AWS ECS and fargate 

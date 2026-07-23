@@ -3,6 +3,11 @@ output "cluster_id" {
   value       = aws_ecs_cluster.this.id
 }
 
+output "cluster_name" {
+  description = "ECS cluster name."
+  value       = aws_ecs_cluster.this.name
+}
+
 output "service_name" {
   description = "ECS service name."
   value       = aws_ecs_service.app.name
@@ -26,6 +31,11 @@ output "load_balancer_security_group_id" {
 output "https_listener_arn" {
   description = "HTTPS listener ARN for additional host-based routes."
   value       = aws_lb_listener.https.arn
+}
+
+output "service_security_group_id" {
+  description = "Security group attached to ECS tasks."
+  value       = aws_security_group.ecs_service.id
 }
 
 output "datadog_api_key_secret_arn" {

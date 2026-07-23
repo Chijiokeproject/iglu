@@ -13,20 +13,25 @@ variable "vpc_id" {
   description = "VPC ID where Jenkins will run."
 }
 
-variable "subnet_ids" {
-  type        = list(string)
-  description = "Public subnet IDs where Jenkins instances will run."
+variable "aws_region" {
+  type        = string
+  description = "AWS region used for EFS DNS and Jenkins tooling."
 }
 
-variable "instance_count" {
-  type        = number
-  description = "Run exactly one Jenkins controller."
-  default     = 1
+variable "subnet_ids" {
+  type        = list(string)
+  description = "Private subnet IDs where Jenkins instances will run."
+}
 
-  validation {
-    condition     = var.instance_count == 1
-    error_message = "instance_count must be exactly 1 because this deployment uses a single Jenkins controller."
-  }
+variable "load_balancer_subnet_ids" {
+  type        = list(string)
+  description = "Public subnet IDs for the internet-facing Jenkins load balancer."
+}
+
+variable "ecr_repository_arns" {
+  type        = list(string)
+  description = "ECR repositories Jenkins may push application images to."
+  default     = []
 }
 
 variable "allowed_admin_cidr" {
@@ -48,6 +53,12 @@ variable "acm_certificate_arn" {
     condition     = var.acm_certificate_arn == null ? true : startswith(var.acm_certificate_arn, "arn:aws:acm:")
     error_message = "acm_certificate_arn must be null or a valid ACM certificate ARN."
   }
+}
+
+variable "enable_https" {
+  type        = bool
+  description = "Create the HTTPS listener and HTTP-to-HTTPS redirect. This must be a plan-time-known value."
+  default     = false
 }
 
 variable "instance_type" {
@@ -75,13 +86,19 @@ variable "ami_id" {
 variable "attach_admin_policy" {
   type        = bool
   description = "Attach AdministratorAccess so Jenkins can run Terraform deployments. Use only for labs or replace with least privilege."
-  default     = true
+  default     = false
 }
 
 variable "node_exporter_version" {
   type        = string
   description = "Prometheus Node Exporter version installed on Jenkins."
   default     = "1.11.1"
+}
+
+variable "checkov_version" {
+  type        = string
+  description = "Pinned Checkov version installed on Jenkins."
+  default     = "3.3.8"
 }
 
 variable "tags" {

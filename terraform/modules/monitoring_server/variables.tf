@@ -13,9 +13,20 @@ variable "vpc_id" {
   description = "VPC ID where monitoring will run."
 }
 
+variable "aws_region" {
+  type        = string
+  description = "AWS region used by Prometheus service discovery and CloudWatch exporter."
+}
+
 variable "subnet_id" {
   type        = string
-  description = "Public subnet ID where monitoring will run."
+  description = "Subnet ID where monitoring will run."
+}
+
+variable "associate_public_ip_address" {
+  type        = bool
+  description = "Whether the monitoring instance receives a public address."
+  default     = true
 }
 
 variable "load_balancer_security_group_id" {
@@ -64,6 +75,18 @@ variable "scrape_targets" {
   default     = []
 }
 
+variable "ec2_sd_tag_name" {
+  type        = string
+  description = "Optional EC2 Name tag dynamically discovered by Prometheus, such as the Jenkins ASG instance tag."
+  default     = null
+}
+
+variable "ecs_cluster_name" {
+  type        = string
+  description = "Optional ECS cluster whose CloudWatch metrics are exported to Prometheus."
+  default     = null
+}
+
 variable "http_probe_targets" {
   type        = list(string)
   description = "HTTP URLs that Prometheus should monitor through Blackbox Exporter."
@@ -98,6 +121,12 @@ variable "blackbox_exporter_version" {
   type        = string
   description = "Blackbox Exporter version to install."
   default     = "0.27.0"
+}
+
+variable "cloudwatch_exporter_version" {
+  type        = string
+  description = "Prometheus CloudWatch exporter version."
+  default     = "0.18.0"
 }
 
 variable "ami_id" {

@@ -30,6 +30,37 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+data "aws_iam_policy_document" "metrics_discovery" {
+  count = var.ec2_sd_tag_name != null || var.ecs_cluster_name != null ? 1 : 0
+
+  dynamic "statement" {
+    for_each = var.ec2_sd_tag_name != null ? [1] : []
+    content {
+      actions   = ["ec2:DescribeInstances"]
+      resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.ecs_cluster_name != null ? [1] : []
+    content {
+      actions = [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics"
+      ]
+      resources = ["*"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "metrics_discovery" {
+  count  = var.ec2_sd_tag_name != null || var.ecs_cluster_name != null ? 1 : 0
+  name   = "${var.project}-${var.environment}-prometheus-discovery"
+  role   = aws_iam_role.monitoring.id
+  policy = data.aws_iam_policy_document.metrics_discovery[0].json
+}
+
 resource "aws_iam_instance_profile" "monitoring" {
   name = "${var.project}-${var.environment}-monitoring-profile"
   role = aws_iam_role.monitoring.name
@@ -179,19 +210,32 @@ resource "aws_instance" "monitoring" {
   subnet_id              = var.subnet_id
   vpc_security_group_ids = [aws_security_group.monitoring.id]
   user_data = templatefile("${path.module}/userdata.sh", {
-    prometheus_version        = var.prometheus_version
-    node_exporter_version     = var.node_exporter_version
-    blackbox_exporter_version = var.blackbox_exporter_version
-    prometheus_targets_yaml   = local.prometheus_targets_yaml
-    http_probe_targets_yaml   = local.http_probe_targets_yaml
-    grafana_hostname          = var.grafana_hostname
-    prometheus_hostname       = var.prometheus_hostname
+    aws_region                  = var.aws_region
+    prometheus_version          = var.prometheus_version
+    node_exporter_version       = var.node_exporter_version
+    blackbox_exporter_version   = var.blackbox_exporter_version
+    cloudwatch_exporter_version = var.cloudwatch_exporter_version
+    ec2_sd_tag_name             = coalesce(var.ec2_sd_tag_name, "")
+    ecs_cluster_name            = coalesce(var.ecs_cluster_name, "")
+    prometheus_targets_yaml     = local.prometheus_targets_yaml
+    http_probe_targets_yaml     = local.http_probe_targets_yaml
+    grafana_hostname            = var.grafana_hostname
+    prometheus_hostname         = var.prometheus_hostname
   })
-  associate_public_ip_address = true
+  associate_public_ip_address = var.associate_public_ip_address
   iam_instance_profile        = aws_iam_instance_profile.monitoring.name
-  user_data_replace_on_change = true
+  user_data_replace_on_change = false
+  monitoring                  = true
 
-  depends_on = [aws_iam_role_policy_attachment.ssm]
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
+  depends_on = [
+    aws_iam_role_policy.metrics_discovery,
+    aws_iam_role_policy_attachment.ssm
+  ]
 
   root_block_device {
     volume_size           = var.root_volume_size

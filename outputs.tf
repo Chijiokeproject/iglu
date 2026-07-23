@@ -3,6 +3,16 @@ output "dev_cluster_id" {
   value       = module.ecs_fargate.cluster_id
 }
 
+output "dev_cluster_name" {
+  description = "ECS cluster name verified by the Jenkins pipeline."
+  value       = module.ecs_fargate.cluster_name
+}
+
+output "dev_service_name" {
+  description = "ECS service name verified by the Jenkins pipeline."
+  value       = module.ecs_fargate.service_name
+}
+
 output "dev_alb_dns_name" {
   description = "Application Load Balancer DNS name for dev environment."
   value       = module.ecs_fargate.load_balancer_dns_name
