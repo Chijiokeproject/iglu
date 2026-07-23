@@ -276,10 +276,17 @@ terraform apply \
   -var='ecr_repository_arns=["arn:aws:ecr:us-east-1:ACCOUNT_ID:repository/iglu/prod/app"]'
 ```
 
-The default Jenkins instance role deliberately does not receive
-`AdministratorAccess`. Configure a separate, scoped Terraform deployment role
-for the pipeline. The compatibility switch
-`jenkins_attach_admin_policy = true` exists for labs only.
+The Jenkins environment currently sets `jenkins_attach_admin_policy = true`, so
+its instance role receives AWS `AdministratorAccess` for Terraform deployments.
+Any pipeline script or Jenkins administrator can therefore make account-wide
+changes. Replace this with a scoped deployment role before treating the
+environment as production-grade.
+The instance role does receive least-privilege backend access: read-only access
+to the Jenkins bootstrap state, read/write access to the dev, tools, and prod
+state objects, and locking access to the Terraform DynamoDB table. Its pipeline
+DNS policy permits hosted-zone discovery but restricts record changes to the
+configured Route 53 hosted zone; ACM certificate lifecycle permissions are
+separated from DNS permissions.
 
 Administrative shell access uses Session Manager by default:
 
@@ -515,6 +522,6 @@ Type `DELETE` when prompted.
 - Do not commit generated `terraform.tfstate` files.
 - Replace backend bucket and lock table names with production-safe values before production use.
 - Store the Datadog API key only in AWS Secrets Manager or another secret manager.
-- The Jenkins EC2 role does not attach `AdministratorAccess` by default. Configure a scoped deployment role before running Terraform from Jenkins.
+- The Jenkins EC2 role currently attaches `AdministratorAccess`; replace it with a scoped deployment role before production use.
 # iglu
 Deploying Application Using AWS ECS and fargate 

@@ -215,8 +215,8 @@ resource "aws_instance" "monitoring" {
     node_exporter_version       = var.node_exporter_version
     blackbox_exporter_version   = var.blackbox_exporter_version
     cloudwatch_exporter_version = var.cloudwatch_exporter_version
-    ec2_sd_tag_name             = coalesce(var.ec2_sd_tag_name, "")
-    ecs_cluster_name            = coalesce(var.ecs_cluster_name, "")
+    ec2_sd_tag_name             = var.ec2_sd_tag_name == null ? "" : var.ec2_sd_tag_name
+    ecs_cluster_name            = var.ecs_cluster_name == null ? "" : var.ecs_cluster_name
     prometheus_targets_yaml     = local.prometheus_targets_yaml
     http_probe_targets_yaml     = local.http_probe_targets_yaml
     grafana_hostname            = var.grafana_hostname

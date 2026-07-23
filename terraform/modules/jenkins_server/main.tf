@@ -21,6 +21,7 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 resource "aws_iam_role_policy_attachment" "admin" {
+  #checkov:skip=CKV_AWS_274:AdministratorAccess was explicitly requested for the Jenkins Terraform deployment role.
   count      = var.attach_admin_policy ? 1 : 0
   role       = aws_iam_role.jenkins.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
@@ -47,6 +48,146 @@ resource "aws_iam_role_policy" "ecr" {
   name   = "${var.project}-${var.environment}-jenkins-ecr"
   role   = aws_iam_role.jenkins.id
   policy = data.aws_iam_policy_document.ecr[0].json
+}
+
+data "aws_iam_policy_document" "terraform_state" {
+  count = var.terraform_state_bucket_name == null ? 0 : 1
+
+  statement {
+    sid       = "ReadStateBucketMetadata"
+    actions   = ["s3:GetBucketLocation"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
+  }
+
+  statement {
+    sid       = "ListApprovedStateKeys"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${var.terraform_state_bucket_name}"]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values = distinct(concat(
+        var.terraform_state_read_only_keys,
+        var.terraform_state_read_write_keys
+      ))
+    }
+  }
+
+  statement {
+    sid     = "ReadApprovedStates"
+    actions = ["s3:GetObject"]
+    resources = [
+      for key in distinct(concat(
+        var.terraform_state_read_only_keys,
+        var.terraform_state_read_write_keys
+      )) : "arn:aws:s3:::${var.terraform_state_bucket_name}/${key}"
+    ]
+  }
+
+  statement {
+    sid = "WriteDeploymentStates"
+    actions = [
+      "s3:DeleteObject",
+      "s3:PutObject"
+    ]
+    resources = [
+      for key in var.terraform_state_read_write_keys :
+      "arn:aws:s3:::${var.terraform_state_bucket_name}/${key}"
+    ]
+  }
+
+  dynamic "statement" {
+    for_each = var.terraform_state_lock_table_name == null ? [] : [var.terraform_state_lock_table_name]
+
+    content {
+      sid = "ManageTerraformStateLocks"
+      actions = [
+        "dynamodb:DeleteItem",
+        "dynamodb:DescribeTable",
+        "dynamodb:GetItem",
+        "dynamodb:PutItem"
+      ]
+      resources = [
+        "arn:aws:dynamodb:${var.aws_region}:*:table/${statement.value}"
+      ]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "terraform_state" {
+  count  = var.terraform_state_bucket_name == null ? 0 : 1
+  name   = "${var.project}-${var.environment}-jenkins-terraform-state"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.terraform_state[0].json
+}
+
+data "aws_iam_policy_document" "pipeline_dns" {
+  count = length(var.route53_hosted_zone_arns) > 0 ? 1 : 0
+
+  statement {
+    sid = "DiscoverHostedZones"
+    actions = [
+      "route53:ListHostedZones",
+      "route53:ListHostedZonesByName"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadDnsChangeStatus"
+    actions   = ["route53:GetChange"]
+    resources = ["arn:aws:route53:::change/*"]
+  }
+
+  statement {
+    sid = "ManageApprovedHostedZones"
+    actions = [
+      "route53:ChangeResourceRecordSets",
+      "route53:GetHostedZone",
+      "route53:ListResourceRecordSets"
+    ]
+    resources = var.route53_hosted_zone_arns
+  }
+}
+
+data "aws_iam_policy_document" "pipeline_certificates" {
+  count = length(var.route53_hosted_zone_arns) > 0 ? 1 : 0
+
+  # RequestCertificate does not support resource-level permissions because the
+  # certificate ARN does not exist until ACM accepts the request.
+  #checkov:skip=CKV_AWS_111:ACM RequestCertificate requires Resource "*" at certificate creation time.
+  #checkov:skip=CKV_AWS_356:ACM RequestCertificate has no resource ARN to constrain before creation.
+  statement {
+    sid       = "RequestPipelineCertificates"
+    actions   = ["acm:RequestCertificate"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "ManageCreatedPipelineCertificates"
+    actions = [
+      "acm:AddTagsToCertificate",
+      "acm:DeleteCertificate",
+      "acm:DescribeCertificate",
+      "acm:ListTagsForCertificate"
+    ]
+    resources = ["arn:aws:acm:${var.aws_region}:*:certificate/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "pipeline_dns" {
+  count  = length(var.route53_hosted_zone_arns) > 0 ? 1 : 0
+  name   = "${var.project}-${var.environment}-jenkins-pipeline-dns"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.pipeline_dns[0].json
+}
+
+resource "aws_iam_role_policy" "pipeline_certificates" {
+  count  = length(var.route53_hosted_zone_arns) > 0 ? 1 : 0
+  name   = "${var.project}-${var.environment}-jenkins-pipeline-certificates"
+  role   = aws_iam_role.jenkins.id
+  policy = data.aws_iam_policy_document.pipeline_certificates[0].json
 }
 
 resource "aws_iam_instance_profile" "jenkins" {

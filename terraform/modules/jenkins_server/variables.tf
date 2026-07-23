@@ -34,6 +34,38 @@ variable "ecr_repository_arns" {
   default     = []
 }
 
+variable "terraform_state_bucket_name" {
+  type        = string
+  description = "S3 bucket containing the Terraform states used by the Jenkins pipeline."
+  default     = null
+  nullable    = true
+}
+
+variable "terraform_state_lock_table_name" {
+  type        = string
+  description = "DynamoDB table used to lock the Terraform states."
+  default     = null
+  nullable    = true
+}
+
+variable "terraform_state_read_only_keys" {
+  type        = list(string)
+  description = "Terraform state object keys Jenkins may read but not modify."
+  default     = []
+}
+
+variable "terraform_state_read_write_keys" {
+  type        = list(string)
+  description = "Terraform state object keys Jenkins may read and modify."
+  default     = []
+}
+
+variable "route53_hosted_zone_arns" {
+  type        = list(string)
+  description = "Route 53 hosted zones where Jenkins may manage pipeline DNS validation and service records."
+  default     = []
+}
+
 variable "allowed_admin_cidr" {
   type        = string
   description = "CIDR block allowed to access the Jenkins ALB."

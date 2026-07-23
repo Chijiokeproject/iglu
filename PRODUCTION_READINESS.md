@@ -7,7 +7,7 @@
 - There was no isolated data tier. Production now uses route-isolated database subnets and encrypted Multi-AZ RDS PostgreSQL with Secrets Manager-managed credentials, backups, Performance Insights, log exports, and deletion protection.
 - Container images used a public mutable tag. ECR now provides immutable tags, scan-on-push, encryption, and lifecycle retention. The initial nginx image remains a bootstrap default until an application release image is pushed.
 - Jenkins and the shared CI tools run without public addresses in private subnets. Jenkins uses a one-controller ASG across two AZs with encrypted, backed-up EFS state; the Jenkins bootstrap and shared tools use independent Terraform states.
-- Jenkins had `AdministratorAccess` by default. It is now disabled by default; ECR push permissions are repository-scoped. A separately scoped Terraform deployment role is still required.
+- Jenkins currently has `AdministratorAccess` at the user's explicit request so its Terraform pipeline can deploy all stacks. This is a temporary production-readiness exception and must be replaced with a scoped deployment role.
 - There was no controlled jump path. Bastions enforce IMDSv2, encryption, detailed monitoring, Session Manager, and optional CIDR-restricted SSH.
 - Maven and image-build tooling were absent from Jenkins. Docker Engine, Buildx, Compose, Maven, Java, Podman, AWS CLI, and `jq` are installed, and the pipeline audits them before tools/dev/prod work.
 - Checkov is pinned and executed before Terraform planning. The checked-in baseline contains the 63 pre-existing findings; new findings fail the pipeline.

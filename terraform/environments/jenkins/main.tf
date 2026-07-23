@@ -81,22 +81,33 @@ module "vpc" {
 }
 
 module "jenkins_server" {
-  source                   = "../../modules/jenkins_server"
-  project                  = local.project
-  environment              = local.environment
-  aws_region               = var.aws_region
-  vpc_id                   = module.vpc.vpc_id
-  subnet_ids               = module.vpc.private_subnet_ids
-  load_balancer_subnet_ids = module.vpc.public_subnet_ids
-  allowed_admin_cidr       = var.allowed_admin_cidr
-  acm_certificate_arn      = local.certificate_arn
-  enable_https             = true
-  instance_type            = var.jenkins_instance_type
-  ami_id                   = var.jenkins_ami_id
-  attach_admin_policy      = var.jenkins_attach_admin_policy
-  ecr_repository_arns      = var.ecr_repository_arns
-  tags                     = local.tags
-  depends_on               = [module.vpc]
+  source                          = "../../modules/jenkins_server"
+  project                         = local.project
+  environment                     = local.environment
+  aws_region                      = var.aws_region
+  vpc_id                          = module.vpc.vpc_id
+  subnet_ids                      = module.vpc.private_subnet_ids
+  load_balancer_subnet_ids        = module.vpc.public_subnet_ids
+  allowed_admin_cidr              = var.allowed_admin_cidr
+  acm_certificate_arn             = local.certificate_arn
+  enable_https                    = true
+  instance_type                   = var.jenkins_instance_type
+  ami_id                          = var.jenkins_ami_id
+  attach_admin_policy             = var.jenkins_attach_admin_policy
+  ecr_repository_arns             = var.ecr_repository_arns
+  terraform_state_bucket_name     = "iglu-terraform-state"
+  terraform_state_lock_table_name = "iglu-terraform-locks"
+  terraform_state_read_only_keys  = ["jenkins/terraform.tfstate"]
+  terraform_state_read_write_keys = [
+    "dev/terraform.tfstate",
+    "tools/terraform.tfstate",
+    "prod/terraform.tfstate"
+  ]
+  route53_hosted_zone_arns = var.create_route53_record ? [
+    "arn:aws:route53:::hostedzone/${data.aws_route53_zone.primary[0].zone_id}"
+  ] : []
+  tags       = local.tags
+  depends_on = [module.vpc]
 }
 
 resource "aws_route53_record" "jenkins" {

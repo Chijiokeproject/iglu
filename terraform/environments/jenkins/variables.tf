@@ -45,8 +45,8 @@ variable "jenkins_ami_id" {
 
 variable "jenkins_attach_admin_policy" {
   type        = bool
-  description = "Attach AdministratorAccess to Jenkins. Disabled by default; prefer a scoped deployment role."
-  default     = false
+  description = "Attach AdministratorAccess to Jenkins so its Terraform pipeline can manage the account."
+  default     = true
 }
 
 variable "ecr_repository_arns" {
