@@ -70,9 +70,13 @@ restore_and_import() {
   terraform -chdir="$terraform_directory" import "$resource_address" "$secret_arn"
 }
 
-restore_and_import \
-  "$api_secret_name" \
-  'module.ecs_fargate.aws_secretsmanager_secret.datadog_api_key[0]'
+if [[ -n "${DATADOG_API_KEY_SECRET_ARN:-}" ]]; then
+  echo "An externally managed Datadog API-key secret ARN was supplied; skipping its recovery and import."
+else
+  restore_and_import \
+    "$api_secret_name" \
+    'module.ecs_fargate.aws_secretsmanager_secret.datadog_api_key[0]'
+fi
 
 restore_and_import \
   "$app_secret_name" \

@@ -125,6 +125,28 @@ pipeline {
       }
     }
 
+    stage('Recover Datadog Secrets') {
+      when {
+        expression {
+          params.ACTION != 'destroy'
+        }
+      }
+
+      steps {
+        script {
+          def secretRecoveryEnvironment = [
+            "DATADOG_API_KEY_SECRET_ARN=${params.DATADOG_API_KEY_SECRET_ARN?.trim() ?: ''}",
+            "DATADOG_API_SECRET_NAME=${params.DATADOG_API_KEY_SECRET_NAME?.trim() ?: ''}",
+            "DATADOG_APP_SECRET_NAME=${params.DATADOG_APP_KEY_SECRET_NAME?.trim() ?: ''}"
+          ]
+
+          withEnv(secretRecoveryEnvironment) {
+            sh "./recover-datadog-secrets.sh ${params.ENVIRONMENT}"
+          }
+        }
+      }
+    }
+
     stage('Terraform Validate') {
       steps {
         dir('terraform/environments/tools') {
