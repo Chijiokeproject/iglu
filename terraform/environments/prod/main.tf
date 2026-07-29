@@ -47,20 +47,27 @@ resource "aws_acm_certificate" "environment" {
 }
 
 resource "aws_route53_record" "certificate_validation" {
-  for_each = var.acm_certificate_arn == null && var.create_route53_record ? {
-    for option in aws_acm_certificate.environment[0].domain_validation_options : option.domain_name => {
-      name   = option.resource_record_name
-      record = option.resource_record_value
-      type   = option.resource_record_type
-    }
-  } : {}
+  for_each = var.acm_certificate_arn == null && var.create_route53_record ? toset([
+    local.prod_fqdn,
+    local.grafana_fqdn,
+    local.prometheus_fqdn,
+  ]) : toset([])
 
   allow_overwrite = true
   zone_id         = data.aws_route53_zone.primary[0].zone_id
-  name            = each.value.name
-  type            = each.value.type
-  ttl             = 60
-  records         = [each.value.record]
+  name = one([
+    for option in aws_acm_certificate.environment[0].domain_validation_options :
+    option.resource_record_name if option.domain_name == each.value
+  ])
+  type = one([
+    for option in aws_acm_certificate.environment[0].domain_validation_options :
+    option.resource_record_type if option.domain_name == each.value
+  ])
+  ttl = 60
+  records = [one([
+    for option in aws_acm_certificate.environment[0].domain_validation_options :
+    option.resource_record_value if option.domain_name == each.value
+  ])]
 }
 
 resource "aws_acm_certificate_validation" "environment" {

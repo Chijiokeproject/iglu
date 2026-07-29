@@ -35,7 +35,7 @@ resource "aws_nat_gateway" "this" {
 }
 
 resource "aws_eip" "nat_secondary" {
-  count  = var.nat_gateway_per_az ? max(length(aws_subnet.public) - 1, 0) : 0
+  count  = var.nat_gateway_per_az ? max(length(var.public_subnet_cidrs) - 1, 0) : 0
   domain = "vpc"
   tags = merge(var.tags, {
     Name = "${var.project}-${var.environment}-nat-eip-${count.index + 2}"
@@ -43,7 +43,7 @@ resource "aws_eip" "nat_secondary" {
 }
 
 resource "aws_nat_gateway" "secondary" {
-  count         = var.nat_gateway_per_az ? max(length(aws_subnet.public) - 1, 0) : 0
+  count         = var.nat_gateway_per_az ? max(length(var.public_subnet_cidrs) - 1, 0) : 0
   allocation_id = aws_eip.nat_secondary[count.index].id
   subnet_id     = aws_subnet.public[count.index + 1].id
   depends_on    = [aws_internet_gateway.this]
@@ -93,7 +93,7 @@ resource "aws_subnet" "database" {
 }
 
 resource "aws_route_table_association" "public" {
-  count          = length(aws_subnet.public)
+  count          = length(var.public_subnet_cidrs)
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
@@ -110,7 +110,7 @@ resource "aws_route_table" "private" {
 }
 
 resource "aws_route_table" "private_secondary" {
-  count  = var.nat_gateway_per_az ? max(length(aws_subnet.private) - 1, 0) : 0
+  count  = var.nat_gateway_per_az ? max(length(var.private_subnet_cidrs) - 1, 0) : 0
   vpc_id = aws_vpc.this.id
   route {
     cidr_block     = "0.0.0.0/0"
@@ -122,13 +122,13 @@ resource "aws_route_table" "private_secondary" {
 }
 
 resource "aws_route_table_association" "private" {
-  count          = length(aws_subnet.private)
+  count          = length(var.private_subnet_cidrs)
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = count.index == 0 || !var.nat_gateway_per_az ? aws_route_table.private.id : aws_route_table.private_secondary[count.index - 1].id
 }
 
 resource "aws_route_table" "database" {
-  count  = length(aws_subnet.database) > 0 ? 1 : 0
+  count  = length(var.database_subnet_cidrs) > 0 ? 1 : 0
   vpc_id = aws_vpc.this.id
   tags = merge(var.tags, {
     Name = "${var.project}-${var.environment}-database-rt"
@@ -136,7 +136,7 @@ resource "aws_route_table" "database" {
 }
 
 resource "aws_route_table_association" "database" {
-  count          = length(aws_subnet.database)
+  count          = length(var.database_subnet_cidrs)
   subnet_id      = aws_subnet.database[count.index].id
   route_table_id = aws_route_table.database[0].id
 }
