@@ -31,10 +31,10 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 }
 
 data "aws_iam_policy_document" "metrics_discovery" {
-  count = var.ec2_sd_tag_name != null || var.ecs_cluster_name != null ? 1 : 0
+  count = var.enable_ec2_discovery || var.enable_ecs_discovery ? 1 : 0
 
   dynamic "statement" {
-    for_each = var.ec2_sd_tag_name != null ? [1] : []
+    for_each = var.enable_ec2_discovery ? [1] : []
     content {
       actions   = ["ec2:DescribeInstances"]
       resources = ["*"]
@@ -42,7 +42,7 @@ data "aws_iam_policy_document" "metrics_discovery" {
   }
 
   dynamic "statement" {
-    for_each = var.ecs_cluster_name != null ? [1] : []
+    for_each = var.enable_ecs_discovery ? [1] : []
     content {
       actions = [
         "cloudwatch:GetMetricData",
@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "metrics_discovery" {
 }
 
 resource "aws_iam_role_policy" "metrics_discovery" {
-  count  = var.ec2_sd_tag_name != null || var.ecs_cluster_name != null ? 1 : 0
+  count  = var.enable_ec2_discovery || var.enable_ecs_discovery ? 1 : 0
   name   = "${var.project}-${var.environment}-prometheus-discovery"
   role   = aws_iam_role.monitoring.id
   policy = data.aws_iam_policy_document.metrics_discovery[0].json

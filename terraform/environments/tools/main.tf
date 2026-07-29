@@ -180,6 +180,7 @@ module "monitoring_server" {
   allowed_admin_cidr              = var.allowed_admin_cidr
   instance_type                   = var.monitoring_instance_type
   ami_id                          = var.monitoring_ami_id
+  enable_ec2_discovery            = true
   ec2_sd_tag_name                 = "iglu-jenkins-jenkins"
   http_probe_targets = concat(
     var.create_route53_records ? ["https://${local.jenkins_fqdn}/login"] : [],

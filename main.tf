@@ -124,6 +124,7 @@ module "monitoring_server" {
   allowed_admin_cidr              = var.allowed_admin_cidr
   instance_type                   = var.monitoring_instance_type
   ami_id                          = var.monitoring_ami_id
+  enable_ecs_discovery            = true
   ecs_cluster_name                = module.ecs_fargate.cluster_name
   http_probe_targets = concat([
     "https://${local.dev_fqdn}",

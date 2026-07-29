@@ -81,10 +81,22 @@ variable "ec2_sd_tag_name" {
   default     = null
 }
 
+variable "enable_ec2_discovery" {
+  type        = bool
+  description = "Whether to grant Prometheus permission to discover EC2 instances."
+  default     = false
+}
+
 variable "ecs_cluster_name" {
   type        = string
   description = "Optional ECS cluster whose CloudWatch metrics are exported to Prometheus."
   default     = null
+}
+
+variable "enable_ecs_discovery" {
+  type        = bool
+  description = "Whether to grant Prometheus permission to read ECS CloudWatch metrics."
+  default     = false
 }
 
 variable "http_probe_targets" {
