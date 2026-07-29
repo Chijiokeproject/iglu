@@ -147,6 +147,7 @@ module "database" {
   allocated_storage          = var.database_allocated_storage
   multi_az                   = true
   deletion_protection        = var.database_deletion_protection
+  skip_final_snapshot        = var.database_skip_final_snapshot
   backup_retention_period    = var.database_backup_retention_period
   tags                       = local.tags
 }

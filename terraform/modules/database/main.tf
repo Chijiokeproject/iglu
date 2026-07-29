@@ -64,6 +64,7 @@ resource "aws_db_instance" "this" {
   monitoring_interval          = 0
   deletion_protection          = var.deletion_protection
   skip_final_snapshot          = var.skip_final_snapshot
+  delete_automated_backups     = true
   final_snapshot_identifier = var.skip_final_snapshot ? null : (
     var.final_snapshot_identifier != null
     ? var.final_snapshot_identifier

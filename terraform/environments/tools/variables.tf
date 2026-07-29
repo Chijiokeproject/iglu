@@ -91,8 +91,8 @@ variable "sonarqube_database_deletion_protection" {
 
 variable "sonarqube_database_skip_final_snapshot" {
   type        = bool
-  description = "Skip the final SonarQube database snapshot only when data loss is intentional."
-  default     = false
+  description = "Skip the final SonarQube database snapshot so a full teardown leaves no retained snapshot."
+  default     = true
 }
 
 variable "sonarqube_database_final_snapshot_identifier" {

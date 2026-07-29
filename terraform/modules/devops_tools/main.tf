@@ -108,7 +108,7 @@ resource "aws_instance" "this" {
     encrypted             = true
     volume_type           = "gp3"
     volume_size           = each.key == "nexus" ? 100 : 50
-    delete_on_termination = false
+    delete_on_termination = true
   }
 
   tags       = merge(var.tags, { Name = "${local.name_prefix}-${each.key}" })

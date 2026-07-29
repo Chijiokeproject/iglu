@@ -29,8 +29,8 @@ variable "deletion_protection" {
 }
 variable "skip_final_snapshot" {
   type        = bool
-  description = "Skip the final RDS snapshot during deletion. Keep false for recoverable teardown."
-  default     = false
+  description = "Skip the final RDS snapshot during deletion so a full teardown leaves no retained snapshot."
+  default     = true
 }
 variable "final_snapshot_identifier" {
   type        = string

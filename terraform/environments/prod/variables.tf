@@ -116,6 +116,12 @@ variable "database_deletion_protection" {
   default     = true
 }
 
+variable "database_skip_final_snapshot" {
+  type        = bool
+  description = "Skip the final production database snapshot so a full teardown leaves no retained snapshot."
+  default     = true
+}
+
 variable "enable_datadog" {
   type        = bool
   description = "Enable the Datadog Agent sidecar for ECS Fargate."

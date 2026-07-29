@@ -16,13 +16,7 @@ pipeline {
     choice(
       name: 'ACTION',
       choices: ['apply', 'destroy'],
-      description: 'Apply the selected environment, or destroy its resources'
-    )
-
-    booleanParam(
-      name: 'DESTROY_SHARED_TOOLS',
-      defaultValue: false,
-      description: 'With ACTION=destroy, also destroy Nexus, SonarQube/RDS, Prometheus, Grafana, and the tools bastion. Jenkins is always retained.'
+      description: 'Apply the selected environment, or destroy it together with all shared tools; Jenkins is retained'
     )
 
     booleanParam(
@@ -102,10 +96,6 @@ pipeline {
         script {
           if (params.ALLOWED_ADMIN_CIDR?.trim() == '0.0.0.0/0') {
             error 'ALLOWED_ADMIN_CIDR must be restricted and cannot be 0.0.0.0/0.'
-          }
-
-          if (params.DESTROY_SHARED_TOOLS && params.ACTION != 'destroy') {
-            error 'DESTROY_SHARED_TOOLS can only be selected with ACTION=destroy.'
           }
 
           if (
@@ -316,13 +306,9 @@ pipeline {
 
       steps {
         script {
-          def destroyScope = params.DESTROY_SHARED_TOOLS
-            ? "${params.ENVIRONMENT} and the shared tools stack; Jenkins will be retained"
-            : "${params.ENVIRONMENT}; shared tools and Jenkins will be retained"
-
           timeout(time: 30, unit: 'MINUTES') {
             input(
-              message: "Approve permanent destroy of ${destroyScope}?",
+              message: "Approve permanent destroy of ${params.ENVIRONMENT} and the shared tools stack? Jenkins will be retained.",
               ok: 'Destroy'
             )
           }
@@ -346,7 +332,8 @@ pipeline {
                 if terraform state list | grep -qx 'module.database.aws_db_instance.this'; then
                   terraform apply -auto-approve \
                     -target=module.database.aws_db_instance.this \
-                    -var='database_deletion_protection=false'
+                    -var='database_deletion_protection=false' \
+                    -var='database_skip_final_snapshot=true'
                 else
                   echo 'Production database is not present in Terraform state; nothing to unprotect.'
                 fi
@@ -354,19 +341,27 @@ pipeline {
             }
           }
 
-          if (params.DESTROY_SHARED_TOOLS) {
-            dir('terraform/environments/tools') {
-              sh '''
-                set -euo pipefail
-                if terraform state list | grep -qx 'module.sonarqube_database.aws_db_instance.this'; then
-                  terraform apply -auto-approve \
-                    -target=module.sonarqube_database.aws_db_instance.this \
-                    -var='sonarqube_database_deletion_protection=false'
-                else
-                  echo 'SonarQube database is not present in Terraform state; nothing to unprotect.'
-                fi
-              '''
-            }
+          dir('terraform/environments/tools') {
+            sh '''
+              set -euo pipefail
+              if terraform state list | grep -qx 'module.sonarqube_database.aws_db_instance.this'; then
+                terraform apply -auto-approve \
+                  -target=module.sonarqube_database.aws_db_instance.this \
+                  -var='sonarqube_database_deletion_protection=false' \
+                  -var='sonarqube_database_skip_final_snapshot=true'
+              else
+                echo 'SonarQube database is not present in Terraform state; nothing to unprotect.'
+              fi
+
+              if terraform state list | grep -q '^module.devops_tools.aws_instance.this'; then
+                terraform apply -auto-approve \
+                  -target=module.devops_tools.aws_instance.this \
+                  -var='sonarqube_database_deletion_protection=false' \
+                  -var='sonarqube_database_skip_final_snapshot=true'
+              else
+                echo 'Nexus and SonarQube instances are not present in Terraform state; no retained volumes to update.'
+              fi
+            '''
           }
         }
       }
@@ -390,6 +385,7 @@ pipeline {
 
             if (params.ENVIRONMENT == 'prod') {
               destroyEnvironment.add('TF_VAR_database_deletion_protection=false')
+              destroyEnvironment.add('TF_VAR_database_skip_final_snapshot=true')
             }
 
             withEnv(destroyEnvironment) {
@@ -402,20 +398,17 @@ pipeline {
 
     stage('Plan Shared Tools Destroy') {
       when {
-        allOf {
-          expression {
-            params.ACTION == 'destroy'
-          }
-
-          expression {
-            params.DESTROY_SHARED_TOOLS
-          }
+        expression {
+          params.ACTION == 'destroy'
         }
       }
 
       steps {
         dir('terraform/environments/tools') {
-          withEnv(['TF_VAR_sonarqube_database_deletion_protection=false']) {
+          withEnv([
+            'TF_VAR_sonarqube_database_deletion_protection=false',
+            'TF_VAR_sonarqube_database_skip_final_snapshot=true'
+          ]) {
             sh 'terraform plan -destroy -out=tfplan'
           }
         }
@@ -442,14 +435,8 @@ pipeline {
 
     stage('Destroy Shared Tools') {
       when {
-        allOf {
-          expression {
-            params.ACTION == 'destroy'
-          }
-
-          expression {
-            params.DESTROY_SHARED_TOOLS
-          }
+        expression {
+          params.ACTION == 'destroy'
         }
       }
 
@@ -525,10 +512,8 @@ pipeline {
       script {
         if (params.ACTION == 'apply') {
           echo "Shared tools and ${params.ENVIRONMENT} apply completed successfully."
-        } else if (params.ACTION == 'destroy' && params.DESTROY_SHARED_TOOLS) {
-          echo "${params.ENVIRONMENT} and shared tools were destroyed successfully; Jenkins was retained."
         } else if (params.ACTION == 'destroy') {
-          echo "${params.ENVIRONMENT} was destroyed successfully; shared tools and Jenkins were retained."
+          echo "${params.ENVIRONMENT} and shared tools were destroyed successfully; Jenkins was retained."
         } else {
           echo "Terraform plan completed successfully for shared tools and ${params.ENVIRONMENT}."
         }
