@@ -15,8 +15,14 @@ pipeline {
 
     choice(
       name: 'ACTION',
-      choices: ['plan', 'apply', 'destroy'],
-      description: 'Terraform action to run'
+      choices: ['apply', 'destroy'],
+      description: 'Apply the selected environment, or destroy its resources'
+    )
+
+    booleanParam(
+      name: 'DESTROY_SHARED_TOOLS',
+      defaultValue: false,
+      description: 'With ACTION=destroy, also destroy Nexus, SonarQube/RDS, Prometheus, Grafana, and the tools bastion. Jenkins is always retained.'
     )
 
     booleanParam(
@@ -96,6 +102,10 @@ pipeline {
         script {
           if (params.ALLOWED_ADMIN_CIDR?.trim() == '0.0.0.0/0') {
             error 'ALLOWED_ADMIN_CIDR must be restricted and cannot be 0.0.0.0/0.'
+          }
+
+          if (params.DESTROY_SHARED_TOOLS && params.ACTION != 'destroy') {
+            error 'DESTROY_SHARED_TOOLS can only be selected with ACTION=destroy.'
           }
 
           if (
@@ -200,6 +210,12 @@ pipeline {
     }
 
     stage('Plan Application Environment') {
+      when {
+        expression {
+          params.ACTION != 'destroy'
+        }
+      }
+
       steps {
         dir(
           params.ENVIRONMENT == 'dev'
@@ -233,11 +249,7 @@ pipeline {
             }
 
             withEnv(terraformEnvironment) {
-              if (params.ACTION == 'destroy') {
-                sh 'terraform plan -destroy -out=tfplan'
-              } else {
-                sh 'terraform plan -out=tfplan'
-              }
+              sh 'terraform plan -out=tfplan'
             }
           }
         }
@@ -246,26 +258,16 @@ pipeline {
 
     stage('Manual Approval') {
       when {
-        anyOf {
-          expression {
-            params.ACTION == 'apply'
-          }
-
-          expression {
-            params.ACTION == 'destroy'
-          }
+        expression {
+          params.ACTION == 'apply'
         }
       }
 
       steps {
         script {
-          def approvalMessage = params.ACTION == 'apply'
-            ? "Approve shared tools followed by the ${params.ENVIRONMENT} environment?"
-            : "Approve destroy for ${params.ENVIRONMENT}? Shared tools will be retained."
-
           timeout(time: 30, unit: 'MINUTES') {
             input(
-              message: approvalMessage,
+              message: "Approve shared tools followed by the ${params.ENVIRONMENT} environment?",
               ok: 'Approve'
             )
           }
@@ -305,6 +307,121 @@ pipeline {
       }
     }
 
+    stage('Destroy Approval') {
+      when {
+        expression {
+          params.ACTION == 'destroy'
+        }
+      }
+
+      steps {
+        script {
+          def destroyScope = params.DESTROY_SHARED_TOOLS
+            ? "${params.ENVIRONMENT} and the shared tools stack; Jenkins will be retained"
+            : "${params.ENVIRONMENT}; shared tools and Jenkins will be retained"
+
+          timeout(time: 30, unit: 'MINUTES') {
+            input(
+              message: "Approve permanent destroy of ${destroyScope}?",
+              ok: 'Destroy'
+            )
+          }
+        }
+      }
+    }
+
+    stage('Disable Database Deletion Protection') {
+      when {
+        expression {
+          params.ACTION == 'destroy'
+        }
+      }
+
+      steps {
+        script {
+          if (params.ENVIRONMENT == 'prod') {
+            dir('terraform/environments/prod') {
+              sh '''
+                set -euo pipefail
+                if terraform state list | grep -qx 'module.database.aws_db_instance.this'; then
+                  terraform apply -auto-approve \
+                    -target=module.database.aws_db_instance.this \
+                    -var='database_deletion_protection=false'
+                else
+                  echo 'Production database is not present in Terraform state; nothing to unprotect.'
+                fi
+              '''
+            }
+          }
+
+          if (params.DESTROY_SHARED_TOOLS) {
+            dir('terraform/environments/tools') {
+              sh '''
+                set -euo pipefail
+                if terraform state list | grep -qx 'module.sonarqube_database.aws_db_instance.this'; then
+                  terraform apply -auto-approve \
+                    -target=module.sonarqube_database.aws_db_instance.this \
+                    -var='sonarqube_database_deletion_protection=false'
+                else
+                  echo 'SonarQube database is not present in Terraform state; nothing to unprotect.'
+                fi
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Plan Application Destroy') {
+      when {
+        expression {
+          params.ACTION == 'destroy'
+        }
+      }
+
+      steps {
+        dir(
+          params.ENVIRONMENT == 'dev'
+            ? '.'
+            : "terraform/environments/${params.ENVIRONMENT}"
+        ) {
+          script {
+            def destroyEnvironment = []
+
+            if (params.ENVIRONMENT == 'prod') {
+              destroyEnvironment.add('TF_VAR_database_deletion_protection=false')
+            }
+
+            withEnv(destroyEnvironment) {
+              sh 'terraform plan -destroy -out=tfplan'
+            }
+          }
+        }
+      }
+    }
+
+    stage('Plan Shared Tools Destroy') {
+      when {
+        allOf {
+          expression {
+            params.ACTION == 'destroy'
+          }
+
+          expression {
+            params.DESTROY_SHARED_TOOLS
+          }
+        }
+      }
+
+      steps {
+        dir('terraform/environments/tools') {
+          withEnv(['TF_VAR_sonarqube_database_deletion_protection=false']) {
+            sh 'terraform plan -destroy -out=tfplan'
+          }
+        }
+      }
+    }
+
     stage('Destroy Application Environment') {
       when {
         expression {
@@ -318,6 +435,26 @@ pipeline {
             ? '.'
             : "terraform/environments/${params.ENVIRONMENT}"
         ) {
+          sh 'terraform apply -auto-approve tfplan'
+        }
+      }
+    }
+
+    stage('Destroy Shared Tools') {
+      when {
+        allOf {
+          expression {
+            params.ACTION == 'destroy'
+          }
+
+          expression {
+            params.DESTROY_SHARED_TOOLS
+          }
+        }
+      }
+
+      steps {
+        dir('terraform/environments/tools') {
           sh 'terraform apply -auto-approve tfplan'
         }
       }
@@ -388,8 +525,12 @@ pipeline {
       script {
         if (params.ACTION == 'apply') {
           echo "Shared tools and ${params.ENVIRONMENT} apply completed successfully."
+        } else if (params.ACTION == 'destroy' && params.DESTROY_SHARED_TOOLS) {
+          echo "${params.ENVIRONMENT} and shared tools were destroyed successfully; Jenkins was retained."
+        } else if (params.ACTION == 'destroy') {
+          echo "${params.ENVIRONMENT} was destroyed successfully; shared tools and Jenkins were retained."
         } else {
-          echo "Terraform ${params.ACTION} completed successfully for ${params.ENVIRONMENT}; shared tools were retained."
+          echo "Terraform plan completed successfully for shared tools and ${params.ENVIRONMENT}."
         }
       }
     }

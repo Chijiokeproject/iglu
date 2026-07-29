@@ -125,6 +125,7 @@ Pipeline parameters:
 
 - `ENVIRONMENT`: `dev` or `prod`; the shared tools stack is an automatic pipeline stage
 - `ACTION`: `plan`, `apply`, or `destroy`
+- `DESTROY_SHARED_TOOLS`: with `ACTION=destroy`, also destroy Nexus, SonarQube/RDS, Prometheus, Grafana, and the tools bastion; Jenkins is always retained
 - `PRODUCTION_CONFIRMATION`: must be exactly `DEPLOY_PROD` for production apply or destroy
 - `ENABLE_DATADOG`: enable the Datadog ECS Fargate sidecar
 - `DATADOG_API_KEY_SECRET_ARN`: Secrets Manager ARN for the Datadog API key
@@ -140,7 +141,13 @@ declares no automatic trigger. Its safe defaults are `ENVIRONMENT=dev` and
 manual approval and the exact `PRODUCTION_CONFIRMATION=DEPLOY_PROD` value.
 For `plan` and `apply`, the pipeline processes the shared tools stack first and
 then the selected application environment. A selected-environment `destroy`
-retains shared tools so deleting dev cannot disrupt tools also used by prod.
+retains shared tools by default so deleting dev cannot disrupt tools also used
+by prod. Select `DESTROY_SHARED_TOOLS` when those shared resources must also be
+removed. The destroy flow disables RDS deletion protection before generating
+fresh application and tools destroy plans. It deliberately retains the Jenkins
+stack because the controller cannot reliably destroy the instance executing its
+own pipeline; destroy `terraform/environments/jenkins` from an external
+workstation or runner.
 Concurrent builds of this pipeline job are disabled because dev and prod both
 plan against the same locked tools state.
 
@@ -156,8 +163,10 @@ chijiokedevops.com
 Terraform creates:
 
 - `jenkins.chijiokedevops.com` -> Jenkins application load balancer
-- the shared `tools` stack creates `grafana.jenkins`, `prometheus.jenkins`,
-  `nexus.jenkins`, and `sonar.jenkins` records against the shared CI load balancer
+- `grafana.chijiokedevops.com` -> shared Grafana service through the CI load balancer
+- `prometheus.chijiokedevops.com` -> shared Prometheus service through the CI load balancer
+- `nexus.chijiokedevops.com` -> shared Nexus service through the CI load balancer
+- `sonar.chijiokedevops.com` -> shared SonarQube service through the CI load balancer
 - `dev.chijiokedevops.com` -> dev application load balancer
 - `grafana.dev.chijiokedevops.com` -> dev monitoring server
 - `prometheus.dev.chijiokedevops.com` -> dev monitoring server

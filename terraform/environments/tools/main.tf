@@ -29,10 +29,10 @@ locals {
   # be moved from the former combined Jenkins state without replacement.
   environment     = "jenkins"
   jenkins_fqdn    = "${var.jenkins_subdomain}.${var.domain_name}"
-  grafana_fqdn    = "grafana.${local.jenkins_fqdn}"
-  prometheus_fqdn = "prometheus.${local.jenkins_fqdn}"
-  nexus_fqdn      = "nexus.${local.jenkins_fqdn}"
-  sonarqube_fqdn  = "sonar.${local.jenkins_fqdn}"
+  grafana_fqdn    = "grafana.${var.domain_name}"
+  prometheus_fqdn = "prometheus.${var.domain_name}"
+  nexus_fqdn      = "nexus.${var.domain_name}"
+  sonarqube_fqdn  = "sonar.${var.domain_name}"
   certificate_arn = var.tools_acm_certificate_arn != null ? var.tools_acm_certificate_arn : try(aws_acm_certificate_validation.tools[0].certificate_arn, null)
   jenkins         = data.terraform_remote_state.jenkins.outputs
   tags = {
