@@ -51,12 +51,16 @@ chown jenkins:jenkins /var/lib/jenkins
 systemctl daemon-reload
 systemctl enable --now jenkins
 
-dnf install -y git unzip maven podman jq awscli python3 python3-pip
+dnf install -y git unzip maven podman jq awscli python3 python3-pip python3.11 python3.11-pip
 
-python3 -m venv /opt/checkov
-/opt/checkov/bin/pip install --upgrade pip
-/opt/checkov/bin/pip install "checkov==${checkov_version}"
-ln -sf /opt/checkov/bin/checkov /usr/local/bin/checkov
+# Checkov's dependency tree can use Python 3.10+ type-union syntax at runtime.
+# RHEL 9's unversioned python3 remains Python 3.9, so keep the scanner on the
+# explicitly installed Python 3.11 runtime.
+python3.11 -m venv /opt/checkov-py311
+/opt/checkov-py311/bin/pip install --upgrade pip
+/opt/checkov-py311/bin/pip install "checkov==${checkov_version}"
+ln -sf /opt/checkov-py311/bin/checkov /usr/local/bin/checkov
+checkov --version
 
 useradd --no-create-home --shell /bin/false node_exporter || true
 cd /tmp
